@@ -74,6 +74,10 @@ Measured with `llama-bench -p 512 -n 32 -r 1` (Vulkan, `-ngl 99`) on a real phon
 | Samsung Xclipse 960 (Exynos) | Qwen3 4B Q4_K_M | 4 | 164.94 t/s | **16.53 t/s** |
 | Samsung Xclipse 960 (Exynos) | Qwen3 4B Q4_K_M | 8 | 149.42 t/s | 16.38 t/s |
 
+![Real llama-bench run on Samsung Xclipse 960 (Vulkan), Qwen3 4B Q4_K_M](screenshots/bench-xclipse960.jpg)
+
+*Real llama-bench run on Samsung Xclipse 960 (Vulkan), Qwen3 4B Q4_K_M*
+
 With full GPU offload, more CPU threads do not help: **`THREADS=2` is recommended** (fastest prompt reading, generation within 10%). `termux/start.sh` uses 2 threads by default when GPU offload is on; override with `THREADS=4 bash ~/nullcloud/termux/start.sh`.
 
 Measure your own device: run `bash termux/bench.sh 20` in Airplane Mode with the charger unplugged. It prints real end-to-end tok/s and seconds per article. PRs with your results are welcome.
