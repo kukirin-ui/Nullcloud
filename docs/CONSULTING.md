@@ -15,7 +15,7 @@ Nullcloud provides turn-key deployment and customization for privacy-sensitive t
 
 ---
 
-## Vertical Solutions & Pre-Built Pro Presets
+## Vertical Solutions & Pre-Built Presets (free)
 
 ### 1. Law Firms & Legal Counsel (`legal-privilege`)
 - **Use Case:** Reviewing contracts, opposing filings, discovery PDFs, and case law without waiving privilege or violating client confidentiality policies.
@@ -38,7 +38,7 @@ Nullcloud provides turn-key deployment and customization for privacy-sensitive t
 
 | Package | Scope | Ideal For |
 |---|---|---|
-| **1. Rapid Team Audit & Setup** | Provisioning on up to 5 phones/laptops, hardware-tuned CPU + GPU Llama 1B/3B GGUF selection (Vulkan/Metal/CUDA `-ngl` + big.LITTLE threads for 5–15+ tok/s on 4GB–6GB+ RAM), offline Pro license keys, and staff onboarding. | Solo practitioners, boutique law practices, independent reporters |
+| **1. Rapid Team Audit & Setup** | Provisioning on up to 5 phones/laptops, hardware-tuned Llama 1B/3B GGUF selection with GPU offload where supported, offline Pro license keys, and staff onboarding. | Solo practitioners, boutique law practices, independent reporters |
 | **2. Private Cloud & Tailscale Fleet** | Dedicated Private Cloud setup connecting team phones and laptops via Tailscale ACLs, shared Obsidian/Markdown vault sync, and 5 custom domain-specific prompt presets. | Small law firms, investigative desks, specialist clinics |
 | **3. Custom Compliance Integration** | Custom document pipelines (local PDF/OCR ingestion), bespoke model quantization/benchmarking on your target devices, and priority support SLA. | Enterprise compliance teams & regulated organizations |
 
@@ -46,9 +46,12 @@ Nullcloud provides turn-key deployment and customization for privacy-sensitive t
 
 ## Prices
 
-Fixed checkouts are in [`docs/MONETIZATION.md`](MONETIZATION.md): Nullcloud Pro €19, remote setup €30, Pro + setup €45.
+Nullcloud itself is free. Services:
 
-Tailscale private cloud (€60-80) and team consulting (from €250): contact [Pozun.alen96@gmail.com](mailto:Pozun.alen96@gmail.com) for a quote.
+- Remote setup: €30 ([Revolut](https://checkout.revolut.com/pay/ee0aad48-1ff6-452b-9470-01ae6db706a4))
+- Setup + priority support: €45 ([Revolut](https://checkout.revolut.com/pay/c60fa94d-e094-4c1f-aac4-ae04c4776c52))
+- Private Cloud (Tailscale) setup: €60-80, quote by email
+- Team setup & consulting: from €250, quote by email to [Pozun.alen96@gmail.com](mailto:Pozun.alen96@gmail.com)
 
 ## Book a Consultation
 

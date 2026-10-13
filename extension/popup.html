@@ -18,7 +18,7 @@ small{opacity:.75;font-size:11px}
 details{margin-bottom:8px;font-size:12px}
 summary{cursor:pointer;opacity:.8;margin-bottom:6px}
 </style></head><body>
-<h3><span>Nullcloud <small>on-device, no cloud AI</small></span><small id="pro-pill">MIT Core</small></h3>
+<h3><span>Nullcloud <small>on-device, no cloud AI</small></span><small id="pro-pill">Free &middot; MIT</small></h3>
 <select id="mode">
   <option value="summary">Summary</option>
   <option value="facts">Key facts</option>
@@ -26,31 +26,30 @@ summary{cursor:pointer;opacity:.8;margin-bottom:6px}
   <option value="eli5">Explain simply</option>
   <option value="translate">Translate</option>
   <option value="ask">Ask a question</option>
-  <option value="preset:legal-privilege">[Pro] Legal: Privilege &amp; Risk Scan</option>
-  <option value="preset:journalism-source">[Pro] Journalism: Source Verification</option>
-  <option value="preset:clinical-intake">[Pro] Clinical: De-Identified Summary</option>
-  <option value="preset:exec-brief">[Pro] Executive: 60s Action Brief</option>
+  <option value="preset:legal-privilege">Legal: Privilege &amp; Risk Scan</option>
+  <option value="preset:journalism-source">Journalism: Source Verification</option>
+  <option value="preset:clinical-intake">Clinical: De-Identified Summary</option>
+  <option value="preset:exec-brief">Executive: 60s Action Brief</option>
 </select>
 <input id="q" placeholder="Your question about this page" style="display:none">
 <input id="lang" placeholder="Answer language (optional)">
 <input id="token" type="password" placeholder="Token (from setup/start script)">
 <details>
-  <summary>CPU / GPU, Private Cloud &amp; Pro Settings</summary>
+  <summary>Compute &amp; Private Cloud Settings</summary>
   <select id="gpu">
-    <option value="99">Compute: Full GPU + CPU (-ngl 99 · Vulkan/Metal/CUDA)</option>
-    <option value="16">Compute: Hybrid CPU + GPU (-ngl 16)</option>
-    <option value="0">Compute: CPU-Only (-ngl 0 · NEON/AVX2)</option>
+    <option value="99">Compute: Full GPU offload (-ngl 99 · Vulkan/Metal/CUDA)</option>
+    <option value="16">Compute: Partial GPU offload (-ngl 16)</option>
+    <option value="0">Compute: No GPU offload (-ngl 0)</option>
   </select>
   <input id="api" placeholder="Server URL (default: http://127.0.0.1:8080)">
-  <input id="license" placeholder="Pro License Key (NULLCLOUD-... optional)">
 </details>
 <button id="go">Run on this page (works offline)</button>
 <div id="out">Select text on the page to analyze only that selection, or click Run for the full page.</div>
 <div id="pay">
-  <a class="buy" href="https://checkout.revolut.com/pay/d25ddfdd-7351-465b-afb6-c6238f65c575" target="_blank" rel="noopener">Get Pro — €19 one-time</a>
+  <p class="pay-note">Nullcloud is free. Need help installing it?</p>
   <a class="buy alt" href="https://checkout.revolut.com/pay/ee0aad48-1ff6-452b-9470-01ae6db706a4" target="_blank" rel="noopener">Remote setup — €30</a>
-  <a class="buy bundle" href="https://checkout.revolut.com/pay/c60fa94d-e094-4c1f-aac4-ae04c4776c52" target="_blank" rel="noopener">Pro + setup — €45</a>
-  <p class="pay-note">Pay via the link, then email Pozun.alen96@gmail.com with the payment confirmation. The license key is sent manually. Tailscale private cloud (€60-80) and team consulting (from €250): contact Pozun.alen96@gmail.com for a quote.</p>
+  <a class="buy bundle" href="https://checkout.revolut.com/pay/c60fa94d-e094-4c1f-aac4-ae04c4776c52" target="_blank" rel="noopener">Setup + priority support — €45</a>
+  <p class="pay-note">After paying, email Pozun.alen96@gmail.com to book a time. Private Cloud (Tailscale) setup €60-80 and team setup from €250: email for a quote.</p>
 </div>
 <div class="row">
   <button id="speak" class="sec">Read aloud</button>

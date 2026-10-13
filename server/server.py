@@ -9,7 +9,7 @@ Free Core (MIT):
 - Airplane Mode / offline text & cached page analysis
 - Read aloud (TTS) & opt-in Markdown / Obsidian vault export
 
-Pro Productivity Hub & Private Cloud (one-time offline ECDSA P-256 license, paid via Revolut):
+Productivity Hub & Private Cloud (also free, no license needed):
 - Saved-page library with SQLite FTS5 full-text search
 - PDF input extraction (offline via pdftotext, pypdf, or built-in stream parser)
 - Custom prompt presets (including high-compliance templates for law, journalism, and clinics)
@@ -17,7 +17,6 @@ Pro Productivity Hub & Private Cloud (one-time offline ECDSA P-256 license, paid
 """
 import base64
 import datetime
-import hashlib
 import hmac
 import ipaddress
 import json
@@ -56,17 +55,10 @@ NOTES_DIR = os.environ.get("NOTES_DIR", "")  # opt-in: save results as Markdown 
 ARCHIVE = os.environ.get("ARCHIVE", "") == "1"  # opt-in: also keep the raw HTML next to each note
 
 HOME_DIR = pathlib.Path(os.environ.get("NULLCLOUD_HOME", str(pathlib.Path.home())))
-LICENSE_FILE = pathlib.Path(os.environ.get("NULLCLOUD_LICENSE_FILE", str(HOME_DIR / ".nullcloud-pro.key")))
 LIBRARY_DB = pathlib.Path(os.environ.get("NULLCLOUD_LIBRARY_DB", str(HOME_DIR / ".nullcloud-library.db")))
 PRESETS_FILE = pathlib.Path(os.environ.get("NULLCLOUD_PRESETS_FILE", str(HOME_DIR / ".nullcloud-presets.json")))
 LAST_RESULT_FILE = pathlib.Path(os.environ.get("NULLCLOUD_LAST_FILE", str(HOME_DIR / ".nullcloud-last.json")))
 COMPUTE_FILE = pathlib.Path(os.environ.get("NULLCLOUD_COMPUTE_FILE", str(HOME_DIR / ".nullcloud-compute.json")))
-
-# Default P-256 SPKI public key for offline Pro license verification (override via NULLCLOUD_PUBKEY for custom builds)
-DEFAULT_LICENSE_PUBKEY = (
-    "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAET3VmbH67NuNHB6LllpF/T4Z8dREJzQYt7JRN5fXU1KRtUSlBMUov7Uq0Biqw/EhqAJpam9vQWU0DhFDDc8gCvw=="
-)
-LICENSE_PUBKEY = os.environ.get("NULLCLOUD_PUBKEY", DEFAULT_LICENSE_PUBKEY)
 
 if not TOKEN and os.environ.get("NULLCLOUD_TESTING") != "1":
     sys.exit("Set TOKEN first, e.g.: TOKEN=$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \\n') python server.py")
@@ -131,123 +123,6 @@ DEFAULT_PRO_PRESETS = [
         ),
     },
 ]
-
-# --- Pure-Python NIST P-256 ECDSA Verification (Zero extra dependencies, 100% offline) ---
-_P256_P = 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF
-_P256_N = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
-_P256_A = _P256_P - 3
-_P256_GX = 0x6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296
-_P256_GY = 0x4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5
-
-
-def _pt_add(p1, p2):
-    if p1 is None:
-        return p2
-    if p2 is None:
-        return p1
-    x1, y1 = p1
-    x2, y2 = p2
-    if x1 == x2 and y1 != y2:
-        return None
-    if x1 == x2:
-        if y1 == 0:
-            return None
-        m = (3 * x1 * x1 + _P256_A) * pow(2 * y1, _P256_P - 2, _P256_P) % _P256_P
-    else:
-        m = (y2 - y1) * pow(x2 - x1, _P256_P - 2, _P256_P) % _P256_P
-    x3 = (m * m - x1 - x2) % _P256_P
-    y3 = (m * (x1 - x3) - y1) % _P256_P
-    return (x3, y3)
-
-
-def _pt_mul(k, p):
-    r = None
-    a = p
-    while k > 0:
-        if k & 1:
-            r = _pt_add(r, a)
-        a = _pt_add(a, a)
-        k >>= 1
-    return r
-
-
-def _b64u_decode(s):
-    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
-
-
-def _parse_der_sig(der):
-    if len(der) < 8 or der[0] != 0x30:
-        raise ValueError("Invalid DER sequence")
-    idx = 2 if der[1] < 0x80 else 2 + (der[1] & 0x7F)
-    if der[idx] != 0x02:
-        raise ValueError("Invalid DER r integer")
-    rlen = der[idx + 1]
-    r = int.from_bytes(der[idx + 2 : idx + 2 + rlen], "big")
-    idx += 2 + rlen
-    if der[idx] != 0x02:
-        raise ValueError("Invalid DER s integer")
-    slen = der[idx + 1]
-    s = int.from_bytes(der[idx + 2 : idx + 2 + slen], "big")
-    return r, s
-
-
-def verify_license_key(key_str, pubkey_b64=None):
-    """Verify an offline NULLCLOUD-<payload>.<sig> ECDSA P-256 key. Never makes network calls."""
-    if not key_str or not isinstance(key_str, str):
-        return False, None
-    k = key_str.strip()
-    for prefix in ("NULLCLOUD-", "MERIDIAN-"):
-        if k.startswith(prefix):
-            k = k[len(prefix) :]
-            break
-    if "." not in k:
-        return False, None
-    try:
-        p_b64, s_b64 = k.split(".", 1)
-        payload = _b64u_decode(p_b64)
-        sig_der = _b64u_decode(s_b64)
-        spki = base64.b64decode((pubkey_b64 or LICENSE_PUBKEY).strip())
-        pub_point = spki[-65:]
-        if len(pub_point) != 65 or pub_point[0] != 0x04:
-            return False, None
-        qx = int.from_bytes(pub_point[1:33], "big")
-        qy = int.from_bytes(pub_point[33:65], "big")
-        r, s = _parse_der_sig(sig_der)
-        if not (1 <= r < _P256_N and 1 <= s < _P256_N):
-            return False, None
-        z = int.from_bytes(hashlib.sha256(payload).digest(), "big")
-        w = pow(s, _P256_N - 2, _P256_N)
-        u1 = (z * w) % _P256_N
-        u2 = (r * w) % _P256_N
-        pt = _pt_add(_pt_mul(u1, (_P256_GX, _P256_GY)), _pt_mul(u2, (qx, qy)))
-        if pt is None or (pt[0] % _P256_N) != r:
-            return False, None
-        claims = json.loads(payload.decode("utf-8"))
-        if claims.get("sku") not in ("pro", "team", "premium"):
-            return False, None
-        return True, claims
-    except Exception:  # noqa: BLE001
-        return False, None
-
-
-def get_pro_status():
-    """Check if Pro tier is unlocked via request header, env var, or saved ~/.nullcloud-pro.key."""
-    candidates = [
-        request.headers.get("X-License-Key", "") if request else "",
-        os.environ.get("NULLCLOUD_LICENSE_KEY", ""),
-    ]
-    if LICENSE_FILE.is_file():
-        try:
-            candidates.append(LICENSE_FILE.read_text(encoding="utf-8").strip())
-        except Exception:  # noqa: BLE001
-            pass
-    for c in candidates:
-        if c:
-            ok, claims = verify_license_key(c)
-            if ok:
-                return True, claims
-    return False, None
-
 
 # --- HTML Parser & SSRF-Safe Fetcher ---
 class _Text(HTMLParser):
@@ -384,7 +259,7 @@ def fetch_text(url):
     return cleaned, raw_html
 
 
-# --- Offline PDF Extraction (Pro feature) ---
+# --- Offline PDF Extraction ---
 def _extract_pdf_bytes_fallback(pdf_bytes):
     """Lightweight pure-Python PDF text extractor for simple/uncompressed or FlateDecode PDF streams."""
     chunks = []
@@ -460,7 +335,7 @@ def extract_pdf_text(pdf_bytes, max_pages=30):
     raise ValueError("Could not extract readable text from PDF. Install poppler (`pkg install poppler`) or pypdf.")
 
 
-# --- Markdown Notes & Pro SQLite FTS5 Library ---
+# --- Markdown Notes & SQLite FTS5 Library ---
 def save_note(url, mode, output, raw):
     """Write a Markdown note (+ optional raw HTML archive). Local files only; never raises."""
     if not NOTES_DIR:
@@ -697,48 +572,15 @@ def authorized():
     return hmac.compare_digest(provided.encode("utf-8"), TOKEN.encode("utf-8"))
 
 
-PRO_CHECKOUT_URL = "https://checkout.revolut.com/pay/d25ddfdd-7351-465b-afb6-c6238f65c575"
 SETUP_CHECKOUT_URL = "https://checkout.revolut.com/pay/ee0aad48-1ff6-452b-9470-01ae6db706a4"
-BUNDLE_CHECKOUT_URL = "https://checkout.revolut.com/pay/c60fa94d-e094-4c1f-aac4-ae04c4776c52"
-QUOTE_EMAIL = "Pozun.alen96@gmail.com"
-PAYMENT_FLOW = (
-    "Pay via the link, then email Pozun.alen96@gmail.com with the payment confirmation. "
-    "The license key is sent manually."
-)
-PAYMENT_OFFERS = [
-    {"id": "pro", "label": "Get Pro", "price": "€19 one-time", "url": PRO_CHECKOUT_URL},
+PRIORITY_CHECKOUT_URL = "https://checkout.revolut.com/pay/c60fa94d-e094-4c1f-aac4-ae04c4776c52"
+CONTACT_EMAIL = "Pozun.alen96@gmail.com"
+SERVICES = [
     {"id": "setup", "label": "Remote setup", "price": "€30", "url": SETUP_CHECKOUT_URL},
-    {"id": "bundle", "label": "Pro + setup", "price": "€45", "url": BUNDLE_CHECKOUT_URL},
+    {"id": "priority", "label": "Setup + priority support", "price": "€45", "url": PRIORITY_CHECKOUT_URL},
+    {"id": "tailscale", "label": "Private Cloud (Tailscale) setup", "price": "€60-80", "url": f"mailto:{CONTACT_EMAIL}"},
+    {"id": "team", "label": "Team setup & consulting", "price": "from €250", "url": f"mailto:{CONTACT_EMAIL}"},
 ]
-
-
-def pro_locked_body(message):
-    return {
-        "error": message,
-        "pro_required": True,
-        "offers": PAYMENT_OFFERS,
-        "payment_flow": PAYMENT_FLOW,
-        "quote": (
-            "Tailscale private cloud (€60-80) and team consulting (from €250): "
-            f"contact {QUOTE_EMAIL} for a quote."
-        ),
-    }
-
-
-def require_pro():
-    is_pro, _claims = get_pro_status()
-    if not is_pro:
-        return (
-            jsonify(
-                **pro_locked_body(
-                    "This feature requires Nullcloud Pro (saved-page library with search, PDF input, "
-                    "custom prompt presets, and Private Cloud server over Tailscale). "
-                    + PAYMENT_FLOW
-                )
-            ),
-            402,
-        )
-    return None
 
 
 # --- HTTP Routes ---
@@ -749,7 +591,6 @@ def ui():
 
 @app.get("/health")
 def health():
-    is_pro, claims = get_pro_status()
     compute = get_compute_config()
     return jsonify(
         ok=True,
@@ -758,8 +599,7 @@ def health():
         model=MODEL,
         max_chars=MAX_CHARS,
         max_tokens=MAX_TOKENS,
-        pro=is_pro,
-        sku=claims.get("sku") if claims else "free",
+        free=True,
         compute=compute,
     )
 
@@ -800,54 +640,30 @@ def last_result():
         return jsonify(error=str(e)), 500
 
 
-@app.get("/pro/status")
-def pro_status():
+@app.get("/features")
+def features():
+    """Every feature is free. Income comes only from optional setup services."""
     if not authorized():
         return jsonify(error="Wrong or missing token."), 401
-    is_pro, claims = get_pro_status()
     return jsonify(
-        pro=is_pro,
-        sku=claims.get("sku") if claims else "free",
-        claims=claims,
-        tailscale=get_tailscale_info() if is_pro else None,
+        free=True,
+        features=["library", "pdf", "presets", "private_cloud"],
+        tailscale=get_tailscale_info(),
+        services=SERVICES,
     )
-
-
-@app.post("/pro/activate")
-def pro_activate():
-    if not authorized():
-        return jsonify(error="Wrong or missing token."), 401
-    d = request.get_json(force=True, silent=True) or {}
-    key_str = (d.get("key") or "").strip()
-    ok, claims = verify_license_key(key_str)
-    if not ok:
-        return jsonify(error="Invalid Nullcloud Pro license key. Check that you copied the full NULLCLOUD-... key."), 400
-    LICENSE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    LICENSE_FILE.write_text(key_str + "\n", encoding="utf-8")
-    try:
-        os.chmod(LICENSE_FILE, 0o600)
-    except OSError:
-        pass
-    return jsonify(ok=True, pro=True, claims=claims, tailscale=get_tailscale_info())
 
 
 @app.get("/presets")
 def get_presets():
     if not authorized():
         return jsonify(error="Wrong or missing token."), 401
-    is_pro, _ = get_pro_status()
-    if not is_pro:
-        return jsonify(presets=[], pro_required=True)
-    return jsonify(presets=load_presets(), pro=True)
+    return jsonify(presets=load_presets())
 
 
 @app.post("/presets")
 def add_preset():
     if not authorized():
         return jsonify(error="Wrong or missing token."), 401
-    gate = require_pro()
-    if gate:
-        return gate
     d = request.get_json(force=True, silent=True) or {}
     name = (d.get("name") or "").strip()
     prompt = (d.get("prompt") or "").strip()
@@ -871,9 +687,6 @@ def add_preset():
 def delete_preset(preset_id):
     if not authorized():
         return jsonify(error="Wrong or missing token."), 401
-    gate = require_pro()
-    if gate:
-        return gate
     custom = []
     if PRESETS_FILE.is_file():
         try:
@@ -889,9 +702,6 @@ def delete_preset(preset_id):
 def list_library():
     if not authorized():
         return jsonify(error="Wrong or missing token."), 401
-    gate = require_pro()
-    if gate:
-        return gate
     q = request.args.get("q", "")
     items = search_library(q)
     return jsonify(items=items, count=len(items))
@@ -901,9 +711,6 @@ def list_library():
 def create_library_item():
     if not authorized():
         return jsonify(error="Wrong or missing token."), 401
-    gate = require_pro()
-    if gate:
-        return gate
     d = request.get_json(force=True, silent=True) or {}
     rowid = save_to_library(
         url=d.get("url") or "",
@@ -919,9 +726,6 @@ def create_library_item():
 def delete_library_item(item_id):
     if not authorized():
         return jsonify(error="Wrong or missing token."), 401
-    gate = require_pro()
-    if gate:
-        return gate
     _init_library_db()
     with sqlite3.connect(LIBRARY_DB) as conn:
         conn.execute("DELETE FROM pages WHERE id = ?", (item_id,))
@@ -937,16 +741,13 @@ def analyze():
     if not authorized():
         return jsonify(error="Wrong or missing token."), 401
     d = request.get_json(force=True, silent=True) or {}
-    is_pro, _ = get_pro_status()
 
     text = (d.get("text") or "").strip()
     raw = ""
     title = (d.get("title") or "").strip()
 
-    # Pro feature: PDF input (base64 encoded PDF bytes)
+    # PDF input (base64 encoded PDF bytes)
     if d.get("pdf_base64"):
-        if not is_pro:
-            return require_pro()
         try:
             pdf_bytes = base64.b64decode(d["pdf_base64"])
             text = extract_pdf_text(pdf_bytes)
@@ -971,10 +772,8 @@ def analyze():
     preset_id = (d.get("preset_id") or "").strip()
     custom_prompt = (d.get("custom_prompt") or "").strip()
 
-    # Pro feature: Custom prompt presets
+    # Custom prompt presets
     if preset_id or custom_prompt or mode.startswith("preset:"):
-        if not is_pro:
-            return require_pro()
         target_id = preset_id or (mode.split(":", 1)[1] if mode.startswith("preset:") else "")
         preset_map = {p["id"]: p["prompt"] for p in load_presets()}
         task = custom_prompt or preset_map.get(target_id)
@@ -1051,7 +850,7 @@ def analyze():
                     pass
                 if NOTES_DIR:
                     save_note(d.get("url") or "", mode, full_output, raw)
-                if is_pro and d.get("save_library", True):
+                if d.get("save_library", True):
                     save_to_library(d.get("url") or "", title, mode, text, full_output)
         except Exception as e:  # noqa: BLE001
             yield f"\n[Model server not reachable: {e}. Is it running? See README > Troubleshooting.]"

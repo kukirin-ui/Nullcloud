@@ -15,7 +15,7 @@ if awk "BEGIN{exit !($BATT_TEMP >= 45)}"; then
 fi
 
 CHOICE="$(termux-dialog radio -t "Nullcloud (On-Device, No Cloud AI)" \
-  -v "Summarize,Summarize + read aloud,Key facts,Explain simply,Claims check,Translate,Legal: Privilege & Risk Scan (Pro),Journalism: Source Check (Pro),Clinical: Summary (Pro)" | jq -r '.text // empty')"
+  -v "Summarize,Summarize + read aloud,Key facts,Explain simply,Claims check,Translate,Legal: Privilege & Risk Scan,Journalism: Source Check,Clinical: Summary" | jq -r '.text // empty')"
 [ -z "$CHOICE" ] && exit 0
 
 SPEAK=0; LANG_OUT=""; PRESET_ID=""
@@ -29,9 +29,9 @@ case "$CHOICE" in
      MODE=translate
      LANG_OUT="$(termux-dialog text -t "Translate to which language?" | jq -r '.text // empty')"
      [ -z "$LANG_OUT" ] && LANG_OUT=English ;;
-  "Legal: Privilege & Risk Scan (Pro)") MODE=summary; PRESET_ID="legal-privilege" ;;
-  "Journalism: Source Check (Pro)") MODE=summary; PRESET_ID="journalism-source" ;;
-  "Clinical: Summary (Pro)") MODE=summary; PRESET_ID="clinical-intake" ;;
+  "Legal: Privilege & Risk Scan") MODE=summary; PRESET_ID="legal-privilege" ;;
+  "Journalism: Source Check") MODE=summary; PRESET_ID="journalism-source" ;;
+  "Clinical: Summary") MODE=summary; PRESET_ID="clinical-intake" ;;
   *) exit 0 ;;
 esac
 

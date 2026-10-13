@@ -10,40 +10,35 @@ function getApiUrl() {
   return ($("api").value.trim() || DEFAULT_API).replace(/\/+$/, "");
 }
 
-async function loadProPresets(api, token, license) {
+async function loadPresets(api, token) {
   if (!token) return;
   try {
     const headers = { "X-Token": token };
-    if (license) headers["X-License-Key"] = license;
     const r = await fetch(api + "/presets", { headers });
     if (!r.ok) return;
     const d = await r.json();
-    if (d.pro) {
-      $("pro-pill").textContent = "Pro Unlocked";
-      const existing = new Set(Array.from($("mode").options).map((o) => o.value));
-      (d.presets || []).forEach((p) => {
-        const val = "preset:" + p.id;
-        if (!existing.has(val)) {
-          const opt = document.createElement("option");
-          opt.value = val;
-          opt.textContent = "[Pro] " + p.name;
-          $("mode").appendChild(opt);
-        }
-      });
-    }
+    const existing = new Set(Array.from($("mode").options).map((o) => o.value));
+    (d.presets || []).forEach((p) => {
+      const val = "preset:" + p.id;
+      if (!existing.has(val)) {
+        const opt = document.createElement("option");
+        opt.value = val;
+        opt.textContent = p.name;
+        $("mode").appendChild(opt);
+      }
+    });
   } catch (_) {}
 }
 
 (async () => {
-  const s = await store.get(["token", "lang", "mode", "api", "license", "gpu"]);
+  const s = await store.get(["token", "lang", "mode", "api", "gpu"]);
   $("token").value = s.token || "";
   $("lang").value = s.lang || "";
   $("mode").value = s.mode || "summary";
   $("api").value = s.api || DEFAULT_API;
-  $("license").value = s.license || "";
   $("gpu").value = s.gpu || "99";
   toggleAsk();
-  loadProPresets(getApiUrl(), $("token").value.trim(), $("license").value.trim());
+  loadPresets(getApiUrl(), $("token").value.trim());
 })();
 
 $("mode").addEventListener("change", toggleAsk);
@@ -56,9 +51,8 @@ $("go").addEventListener("click", async () => {
   const lang = $("lang").value.trim();
   const mode = $("mode").value;
   const api = getApiUrl();
-  const license = $("license").value.trim();
   const gpu = $("gpu").value || "99";
-  await store.set({ token, lang, mode, api, license, gpu });
+  await store.set({ token, lang, mode, api, gpu });
   if (!token) {
     out.textContent = "Paste your token first (printed by setup.sh / start.sh).";
     return;
@@ -78,7 +72,6 @@ $("go").addEventListener("click", async () => {
     const text = "Title: " + page.title + "\n\n" + (page.sel.length > 40 ? page.sel : page.body);
     out.textContent = "Thinking (on-device CPU + GPU, no cloud AI)...";
     const headers = { "Content-Type": "application/json", "X-Token": token };
-    if (license) headers["X-License-Key"] = license;
     const r = await fetch(api + "/analyze", {
       method: "POST",
       headers,
@@ -98,12 +91,6 @@ $("go").addEventListener("click", async () => {
     }
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
-      if (r.status === 402) {
-        out.textContent =
-          (err.error || "Nullcloud Pro is required.") +
-          " Use Get Pro, Remote setup, or Pro + setup below. Pay via the link, then email Pozun.alen96@gmail.com with the payment confirmation. The license key is sent manually.";
-        return;
-      }
       out.textContent = err.error || "Error " + r.status;
       return;
     }

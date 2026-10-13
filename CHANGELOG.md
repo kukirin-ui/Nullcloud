@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## [2.0.0] - 2026-10-13
+
+### Changed
+- **Nullcloud is now completely free.** Library, PDF input, custom presets and Private Cloud work for everyone. No license key, no paywall.
+- Removed the Pro license (ECDSA key check, `/pro/status`, `/pro/activate`, `tools/license/`). Added `GET /features`.
+- Income is from optional services only: remote setup €30, setup + priority support €45, Private Cloud (Tailscale) setup €60-80 and team setup from €250 (quote by email).
+- README: honest hardware notes (tested on Exynos with GPU/Vulkan), removed unmeasured speed tables, added Termux troubleshooting, replaced the broken Sponsor badge with an optional Revolut donation link.
+
 ## [1.2.0] - 2026-10-13
 
 ### Changed

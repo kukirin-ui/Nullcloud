@@ -1,6 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # Nullcloud Termux Setup — Unified One-Command Installer (Share Sheet + Web UI + Extension Backend)
-# Pre-configures Llama 3.2 1B (4GB RAM) or 3B (6GB+ RAM) with CPU + GPU acceleration for 5-15+ tok/s on-device.
+# Pre-configures Llama 3.2 1B (under ~5.5 GB RAM) or 3B (6 GB+ RAM) with GPU offload. Tested on Exynos with Vulkan.
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODELS="$HOME/nullcloud-models"; mkdir -p "$MODELS"
@@ -50,7 +50,7 @@ MODEL_URL="${MODEL_URL:-$DEFAULT_URL}"
 
 echo "== Nullcloud On-Device AI Setup (CPU + GPU Hybrid) =="
 echo "Detected RAM: ${MEM_GB} GB | GPU: ${GPU_NAME}"
-echo "Selecting ${MODEL_NAME} profile (target: 5-15+ tok/s offline)"
+echo "Selecting ${MODEL_NAME} profile (run termux/bench.sh to measure speed)"
 
 pkg update -y && pkg upgrade -y
 pkg install -y python curl wget jq termux-api unzip poppler vulkan-loader-android 2>/dev/null || \
