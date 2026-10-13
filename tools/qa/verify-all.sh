@@ -30,15 +30,12 @@ for icon in ("16.png", "48.png", "128.png"):
 '
 echo "  [OK] Extension manifest valid"
 
-echo "== 4. Testing offline ECDSA P-256 license tools (keygen, sign, verify) =="
-TMP_KEYS="$(mktemp -d)"
-trap 'rm -rf "$TMP_KEYS"' EXIT
-node tools/license/keygen.mjs "$TMP_KEYS" >/dev/null
-KEY_PRO="$(node tools/license/sign.mjs --ref QA-100 --key "$TMP_KEYS/private.pem" --sku pro)"
-node tools/license/verify.mjs "$KEY_PRO" --pub "$TMP_KEYS/public.b64" >/dev/null
-KEYS_2="$(node tools/license/sign.mjs --ref QA-200 --key "$TMP_KEYS/private.pem" --sku pro --copies 2)"
-[ "$(printf '%s\n' "$KEYS_2" | wc -l)" -eq 2 ]
-echo "  [OK] Offline P-256 license tools verified"
+echo "== 4. Checking everything is free (no paywall or license gate left) =="
+if grep -rn "d25ddfdd\|require_pro\|pro_required\|license_key\|X-License-Key" server/ extension/ termux/ desktop/ docs/ .github/ README.md >/dev/null 2>&1; then
+  echo "FAIL: Found leftover Pro paywall / license code"
+  exit 1
+fi
+echo "  [OK] All features free"
 
 echo "== 5. Running pytest suite =="
 python3 -m pytest -q

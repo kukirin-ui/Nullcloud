@@ -19,4 +19,4 @@ body:
     id: logs
     attributes:
       label: Relevant logs
-      description: Paste output from `~/nullcloud-api.log` or `~/nullcloud-llm.log` (never include your token or license key).
+      description: Paste output from `~/nullcloud-api.log` or `~/nullcloud-llm.log` (never include your token).
