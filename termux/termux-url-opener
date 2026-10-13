@@ -1,0 +1,78 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Android Share Sheet -> Termux -> Private on-device summary notification (no browser extension needed).
+# Works with shared URLs, selected text, and local PDF files (even in Airplane Mode).
+INPUT="$1"
+[ -z "$INPUT" ] && exit 0
+TOKEN="$(cat "$HOME/.nullcloud-token" 2>/dev/null)"
+ROOT="$(cat "$HOME/.nullcloud-root" 2>/dev/null || echo "$HOME/nullcloud")"
+
+# Thermal safety guard (inspired by Meridian thermal protection)
+BATT_TEMP="$(termux-battery-status 2>/dev/null | jq -r '.temperature // 30' 2>/dev/null || echo 30)"
+if awk "BEGIN{exit !($BATT_TEMP >= 45)}"; then
+  termux-notification --id nullcloud --title "Nullcloud paused (${BATT_TEMP}°C)" \
+    --content "Phone battery is warm (${BATT_TEMP}°C). Let it cool below 45°C before running local AI." 2>/dev/null
+  exit 1
+fi
+
+CHOICE="$(termux-dialog radio -t "Nullcloud (On-Device, No Cloud AI)" \
+  -v "Summarize,Summarize + read aloud,Key facts,Explain simply,Claims check,Translate,Legal: Privilege & Risk Scan (Pro),Journalism: Source Check (Pro),Clinical: Summary (Pro)" | jq -r '.text // empty')"
+[ -z "$CHOICE" ] && exit 0
+
+SPEAK=0; LANG_OUT=""; PRESET_ID=""
+case "$CHOICE" in
+  "Summarize") MODE=summary ;;
+  "Summarize + read aloud") MODE=summary; SPEAK=1 ;;
+  "Key facts") MODE=facts ;;
+  "Explain simply") MODE=eli5 ;;
+  "Claims check") MODE=claims ;;
+  "Translate")
+     MODE=translate
+     LANG_OUT="$(termux-dialog text -t "Translate to which language?" | jq -r '.text // empty')"
+     [ -z "$LANG_OUT" ] && LANG_OUT=English ;;
+  "Legal: Privilege & Risk Scan (Pro)") MODE=summary; PRESET_ID="legal-privilege" ;;
+  "Journalism: Source Check (Pro)") MODE=summary; PRESET_ID="journalism-source" ;;
+  "Clinical: Summary (Pro)") MODE=summary; PRESET_ID="clinical-intake" ;;
+  *) exit 0 ;;
+esac
+
+termux-notification --id nullcloud --title "Nullcloud: $CHOICE" \
+  --content "Processing on-device (no cloud AI)..." 2>/dev/null
+
+if ! curl -s http://127.0.0.1:8080/health >/dev/null; then
+  bash "$ROOT/termux/start.sh"
+fi
+
+echo "$CHOICE (on-device, no cloud AI): $INPUT"; echo
+
+# Detect whether INPUT is an http(s) URL, a local PDF file, or raw shared text (Airplane Mode)
+if [[ "$INPUT" =~ ^https?:// ]]; then
+  PAYLOAD="$(jq -n --arg u "$INPUT" --arg m "$MODE" --arg l "$LANG_OUT" --arg p "$PRESET_ID" \
+    '{url:$u,mode:$m,lang:$l,preset_id:$p}')"
+elif [ -f "$INPUT" ] && [[ "${INPUT,,}" == *.pdf ]]; then
+  B64="$(base64 -w 0 "$INPUT" 2>/dev/null || base64 "$INPUT" | tr -d '\r\n')"
+  FNAME="$(basename "$INPUT")"
+  PAYLOAD="$(jq -n --arg b "$B64" --arg fn "$FNAME" --arg m "$MODE" --arg l "$LANG_OUT" --arg p "$PRESET_ID" \
+    '{pdf_base64:$b,filename:$fn,mode:$m,lang:$l,preset_id:$p}')"
+elif [ -f "$INPUT" ]; then
+  TXT="$(head -c 12000 "$INPUT")"
+  PAYLOAD="$(jq -n --arg t "$TXT" --arg m "$MODE" --arg l "$LANG_OUT" --arg p "$PRESET_ID" \
+    '{text:$t,mode:$m,lang:$l,preset_id:$p}')"
+else
+  PAYLOAD="$(jq -n --arg t "$INPUT" --arg m "$MODE" --arg l "$LANG_OUT" --arg p "$PRESET_ID" \
+    '{text:$t,mode:$m,lang:$l,preset_id:$p}')"
+fi
+
+printf '%s' "$PAYLOAD" | \
+  curl -sN -X POST http://127.0.0.1:8080/analyze -H "X-Token: $TOKEN" \
+  -H "Content-Type: application/json" -d @- | tee "$HOME/.nullcloud-last.txt"
+echo
+
+SUMMARY_HEAD="$(head -c 500 "$HOME/.nullcloud-last.txt")"
+termux-notification --id nullcloud --title "Nullcloud: $CHOICE" \
+  --content "$SUMMARY_HEAD" \
+  --button1 "Copy" --button1-action "termux-clipboard-set < $HOME/.nullcloud-last.txt" \
+  --button2 "Open UI" --button2-action "termux-open-url http://127.0.0.1:8080" 2>/dev/null
+
+# Read aloud uses Android's TTS engine. Fully offline when an offline voice is installed
+# (Android Settings > Text-to-speech > install voice data).
+[ "$SPEAK" = 1 ] && termux-tts-speak < "$HOME/.nullcloud-last.txt"

@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nullcloud — On-Device, No Cloud AI</title>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--fg:#0f172a;--mut:#64748b;--ac:#0d9488;--bd:#cbd5e1;--card:#f8fafc;--pro:#d97706}
+@media(prefers-color-scheme:dark){:root{--bg:#0b1220;--fg:#e2e8f0;--mut:#94a3b8;--bd:#1e293b;--card:#111a2e;--pro:#f59e0b}}
+body{margin:0 auto;padding:16px;max-width:680px;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,sans-serif}
+header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;flex-wrap:wrap}
+h1{font-size:20px;margin:0;display:flex;align-items:center;gap:8px}
+.badge{font-size:11px;padding:2px 8px;border-radius:99px;background:var(--card);border:1px solid var(--bd);color:var(--mut);font-weight:600}
+.badge.pro{border-color:var(--pro);color:var(--pro)}
+p.s{color:var(--mut);margin:0 0 12px;font-size:13px}
+nav{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+nav button{width:auto;flex:1;padding:8px 10px;margin:0;background:var(--card);color:var(--fg);border:1px solid var(--bd);font-size:13px;cursor:pointer}
+nav button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+input,select,textarea,button{width:100%;box-sizing:border-box;margin:0 0 10px;padding:10px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--fg);font:inherit}
+button{background:var(--ac);color:#fff;border:0;font-weight:600;cursor:pointer}
+button.sec{background:#475569;color:#fff}
+a.buy{display:block;text-align:center;text-decoration:none;background:var(--ac);color:#fff;border-radius:8px;padding:10px;margin:0 0 8px;font-weight:600}
+a.buy.alt{background:#0f766e}
+a.buy.bundle{background:#115e59}
+.pay-note{font-size:12px;color:var(--mut);margin:8px 0 0}
+.row{display:flex;gap:8px}
+.row > *{flex:1}
+#out{white-space:pre-wrap;padding:12px;border:1px solid var(--bd);border-radius:8px;background:var(--card);min-height:80px}
+.card{padding:12px;border:1px solid var(--bd);border-radius:8px;background:var(--card);margin-bottom:10px}
+.card h3{margin:0 0 6px;font-size:15px}
+.small{font-size:12px;color:var(--mut)}
+.hide{display:none!important}
+code{font-family:ui-monospace,monospace;font-size:12px;background:var(--bg);padding:2px 5px;border-radius:4px;border:1px solid var(--bd)}
+</style></head><body>
+<header>
+  <h1>Nullcloud <span id="tier-badge" class="badge">Free Core (MIT)</span></h1>
+  <span id="offline-pill" class="badge">Airplane-Mode Ready · CPU + GPU</span>
+</header>
+<p class="s">On-device, no cloud AI. Summarize, extract facts, or question any page, text, or PDF right on your phone or laptop using local CPU + GPU acceleration.</p>
+
+<input id="token" type="password" placeholder="Token (printed by setup.sh / start.sh, or ~/.nullcloud-token)">
+
+<nav>
+  <button id="tab-btn-analyze" class="on" onclick="showTab('analyze')">Analyze</button>
+  <button id="tab-btn-library" onclick="showTab('library')">Saved Library <small>(Pro)</small></button>
+  <button id="tab-btn-presets" onclick="showTab('presets')">Presets <small>(Pro)</small></button>
+  <button id="tab-btn-cloud" onclick="showTab('cloud')">Private Cloud &amp; Pro</button>
+</nav>
+
+<section id="tab-analyze">
+  <input id="url" type="url" placeholder="Paste a link (https://...) — or leave blank for Airplane Mode text/PDF">
+  <textarea id="text" rows="4" placeholder="...or paste article / contract / clinical text directly (works 100% offline in Airplane Mode)"></textarea>
+  <div class="card" style="padding:8px 10px">
+    <label class="small" for="pdf-file"><strong>PDF Input (Pro):</strong> Upload a local PDF for on-device extraction</label>
+    <input id="pdf-file" type="file" accept="application/pdf,.pdf" style="margin:6px 0 0;padding:6px">
+  </div>
+  <select id="mode">
+    <option value="summary">Summary (3-5 bullets + why it matters)</option>
+    <option value="facts">Key facts, numbers, names &amp; dates</option>
+    <option value="claims">Claims check (evidence vs assertions)</option>
+    <option value="eli5">Explain simply (ELI5)</option>
+    <option value="translate">Translate</option>
+    <option value="ask">Ask a question</option>
+  </select>
+  <input id="q" class="hide" placeholder="Your question about this page / document">
+  <input id="lang" placeholder="Answer language (optional, e.g. Spanish)">
+  <button id="go">Run On-Device</button>
+  <div id="out">Output appears here. Small local models (1B/3B) run fast on your device but may make mistakes—verify critical facts.</div>
+  <div class="row" style="margin-top:10px">
+    <button id="speak" class="sec">Read aloud / stop</button>
+    <button id="copy-btn" class="sec">Copy output</button>
+    <button id="last-btn" class="sec">Load last Share-Sheet result</button>
+  </div>
+</section>
+
+<section id="tab-library" class="hide">
+  <div class="card">
+    <h3>Saved-Page Library &amp; Offline Search (Pro)</h3>
+    <p class="small" style="margin:0 0 8px">Every analyzed page and PDF is indexed locally in SQLite FTS5 (`~/.nullcloud-library.db`) for instant offline search—even in Airplane Mode.</p>
+    <div class="row">
+      <input id="lib-q" placeholder="Search saved titles, URLs, full text, or summaries..." style="margin:0">
+      <button id="lib-search-btn" style="max-width:120px;margin:0">Search</button>
+    </div>
+  </div>
+  <div id="lib-list"></div>
+</section>
+
+<section id="tab-presets" class="hide">
+  <div class="card">
+    <h3>Custom Prompt Presets (Pro)</h3>
+    <p class="small" style="margin:0 0 8px">Includes pre-built high-compliance templates for Law Firms, Journalists, and Medical Clinics, plus your own custom instructions.</p>
+    <input id="preset-name" placeholder="Preset name (e.g. Deposition Summary)">
+    <input id="preset-cat" placeholder="Category (e.g. Legal, Research, Personal)">
+    <textarea id="preset-prompt" rows="3" placeholder="System task instructions for the local model..."></textarea>
+    <button id="preset-save-btn">Save Custom Preset</button>
+  </div>
+  <div id="preset-list"></div>
+</section>
+
+<section id="tab-cloud" class="hide">
+  <div class="card">
+    <h3>Nullcloud Pro — Productivity Hub &amp; Private Cloud</h3>
+    <p class="small">Unlock the <strong>Saved-Page Library with full-text search</strong>, <strong>PDF input extraction</strong>, <strong>Custom Prompt Presets</strong>, and <strong>Tailscale Private Cloud</strong> with a one-time offline license key (verified locally via ECDSA P-256).</p>
+    <a class="buy" href="https://checkout.revolut.com/pay/d25ddfdd-7351-465b-afb6-c6238f65c575" target="_blank" rel="noopener">Get Pro — €19 one-time</a>
+    <a class="buy alt" href="https://checkout.revolut.com/pay/ee0aad48-1ff6-452b-9470-01ae6db706a4" target="_blank" rel="noopener">Remote setup — €30</a>
+    <a class="buy bundle" href="https://checkout.revolut.com/pay/c60fa94d-e094-4c1f-aac4-ae04c4776c52" target="_blank" rel="noopener">Pro + setup — €45</a>
+    <p class="pay-note">Pay via the link, then email <a href="mailto:Pozun.alen96@gmail.com">Pozun.alen96@gmail.com</a> with the payment confirmation. The license key is sent manually.</p>
+    <p class="pay-note">Tailscale private cloud (€60-80) and team consulting (from €250): contact Pozun.alen96@gmail.com for a quote.</p>
+    <input id="license-key" placeholder="Paste NULLCLOUD-... license key" style="margin-top:10px">
+    <button id="activate-btn">Activate Offline License Key</button>
+    <div id="pro-msg" class="small" style="margin-top:6px"></div>
+  </div>
+
+  <div class="card">
+    <h3>CPU &amp; GPU Hardware Acceleration Tweaks</h3>
+    <p class="small" style="margin:0 0 8px">Tune both <strong>GPU layer offload</strong> (Vulkan / OpenCL on Snapdragon Adreno &amp; Arm Mali, Apple Metal, NVIDIA CUDA, AMD ROCm) and <strong>CPU big.LITTLE threads</strong> + quantized KV cache (<code>q8_0/q4_0</code>):</p>
+    <div id="hw-summary" class="small" style="margin-bottom:8px">Detecting local CPU + GPU engine...</div>
+    <div class="row">
+      <div>
+        <label class="small" for="gpu-layers"><strong>GPU Offload Layers (<code>-ngl</code>)</strong></label>
+        <select id="gpu-layers" style="margin-top:4px">
+          <option value="99">Full GPU Offload (-ngl 99 · Vulkan/Metal/CUDA)</option>
+          <option value="16">Balanced Hybrid CPU + GPU (-ngl 16)</option>
+          <option value="8">Light Mobile GPU Assist (-ngl 8 · 4GB RAM safe)</option>
+          <option value="0">CPU-Only (-ngl 0 · ARM NEON / AVX2)</option>
+        </select>
+      </div>
+      <div>
+        <label class="small" for="cpu-threads"><strong>CPU Threads (big.LITTLE cap)</strong></label>
+        <select id="cpu-threads" style="margin-top:4px">
+          <option value="4">4 Threads (1B optimal / cool battery)</option>
+          <option value="6">6 Threads (3B big-cores optimal)</option>
+          <option value="8">8 Threads (Desktop / high-core)</option>
+          <option value="2">2 Threads (Ultra low-power)</option>
+        </select>
+      </div>
+    </div>
+    <button id="hw-save-btn">Apply CPU + GPU Tweaks</button>
+    <div id="hw-msg" class="small"></div>
+  </div>
+
+  <div class="card">
+    <h3>Phone as a Private Cloud AI Server (via Tailscale)</h3>
+    <p class="small">Turn your phone into a private on-device AI server accessible from your laptop or iPad over your encrypted Tailscale tailnet—without exposing port 8080 to public Wi-Fi:</p>
+    <div id="tailscale-box" class="small">
+      <p>1. Install <a href="https://tailscale.com" target="_blank" rel="noopener">Tailscale</a> on your phone and laptop.</p>
+      <p>2. Start Nullcloud bound to your Tailscale IP: <code>TAILSCALE=1 bash ~/nullcloud/termux/start.sh</code></p>
+      <p>3. In the laptop Browser Extension or Web UI, set the Server URL to your phone's Tailscale address (<span id="ts-url"><code>http://100.x.y.z:8080</code></span>).</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>High-Compliance Consulting &amp; Community Support</h3>
+    <p class="small">Need turn-key on-device AI deployment, custom preset workflows, or Tailscale fleet setup for a <strong>law firm, newsroom, or medical clinic</strong>? See <code>docs/CONSULTING.md</code> or reach out via GitHub.</p>
+    <p class="small" style="margin-bottom:0">The free MIT core is supported via <a href="https://github.com/sponsors/kukirin-ui" target="_blank" rel="noopener">GitHub Sponsors</a>.</p>
+  </div>
+</section>
+
+<script>
+const $=id=>document.getElementById(id),L=localStorage;
+let pdfBase64="",pdfFilename="",isPro=false,presets=[];
+["token","lang"].forEach(k=>{if($(k))$(k).value=L.getItem(k)||""});
+
+function headers(){
+  const h={"Content-Type":"application/json","X-Token":$("token").value.trim()};
+  const lk=L.getItem("license_key")||"";
+  if(lk)h["X-License-Key"]=lk;
+  return h;
+}
+
+function showTab(name){
+  ["analyze","library","presets","cloud"].forEach(t=>{
+    $("tab-"+t).classList.toggle("hide",t!==name);
+    $("tab-btn-"+t).classList.toggle("on",t===name);
+  });
+  if(name==="library")loadLibrary();
+  if(name==="presets")loadPresets();
+  if(name==="cloud")refreshStatus();
+}
+
+$("mode").onchange=()=>{
+  $("q").classList.toggle("hide",$("mode").value!=="ask");
+};
+
+$("pdf-file").onchange=e=>{
+  const f=e.target.files&&e.target.files[0];
+  if(!f){pdfBase64="";pdfFilename="";return;}
+  pdfFilename=f.name;
+  const r=new FileReader();
+  r.onload=()=>{
+    const res=String(r.result||"");
+    pdfBase64=res.includes(",")?res.split(",")[1]:res;
+  };
+  r.readAsDataURL(f);
+};
+
+async function refreshStatus(){
+  try{
+    const hRes=await fetch("/health");
+    if(hRes.ok){
+      const hd=await hRes.json();
+      if(hd.compute){
+        $("offline-pill").textContent="Airplane-Mode · "+(hd.compute.gpu_layers>0?"CPU+GPU":"CPU");
+        $("hw-summary").innerHTML="Active Engine: <code>"+esc(hd.compute.accel_summary)+"</code>";
+        $("gpu-layers").value=String([0,8,16,99].includes(hd.compute.gpu_layers)?hd.compute.gpu_layers:99);
+        $("cpu-threads").value=String([2,4,6,8].includes(hd.compute.cpu_threads)?hd.compute.cpu_threads:4);
+      }
+    }
+  }catch(_){}
+  const token=$("token").value.trim();
+  if(!token)return;
+  L.setItem("token",token);
+  try{
+    const r=await fetch("/pro/status",{headers:headers()});
+    if(!r.ok)return;
+    const d=await r.json();
+    isPro=!!d.pro;
+    const b=$("tier-badge");
+    b.textContent=isPro?("Pro Unlocked ("+(d.sku||"pro").toUpperCase()+")"):"Free Core (MIT)";
+    b.classList.toggle("pro",isPro);
+    if(d.tailscale&&d.tailscale.private_cloud_url){
+      $("ts-url").innerHTML="<code>"+d.tailscale.private_cloud_url+"</code>";
+    }
+    if(isPro)await loadPresets();
+  }catch(_){}
+}
+
+async function loadPresets(){
+  try{
+    const r=await fetch("/presets",{headers:headers()});
+    if(!r.ok)return;
+    const d=await r.json();
+    presets=d.presets||[];
+    const sel=$("mode");
+    Array.from(sel.querySelectorAll("option[data-preset]")).forEach(o=>o.remove());
+    presets.forEach(p=>{
+      const opt=document.createElement("option");
+      opt.value="preset:"+p.id;
+      opt.dataset.preset="1";
+      opt.textContent="[Pro Preset] "+p.name;
+      sel.appendChild(opt);
+    });
+    const list=$("preset-list");
+    if(!d.pro){
+      list.innerHTML=paywallHtml("Activate Nullcloud Pro to unlock custom and compliance prompt presets.");
+      return;
+    }
+    list.innerHTML=presets.map(p=>`<div class="card"><strong>${esc(p.name)}</strong> <span class="badge">${esc(p.category||"Preset")}</span><p class="small" style="margin:6px 0 0">${esc(p.prompt)}</p></div>`).join("");
+  }catch(_){}
+}
+
+async function loadLibrary(){
+  const list=$("lib-list");
+  try{
+    const q=encodeURIComponent($("lib-q").value.trim());
+    const r=await fetch("/library?q="+q,{headers:headers()});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){
+      list.innerHTML=r.status===402?paywallHtml(d.error):`<div class="card small">${esc(d.error||"Could not load the library.")}</div>`;
+      return;
+    }
+    if(!d.items||!d.items.length){
+      list.innerHTML='<div class="card small">No saved pages matching your query yet. Run an analysis to populate your offline library.</div>';
+      return;
+    }
+    list.innerHTML=d.items.map(it=>`<div class="card">
+      <div style="display:flex;justify-content:space-between;gap:8px">
+        <strong>${esc(it.title||"Untitled")}</strong>
+        <span class="small">${esc(it.created_at||"")} · ${esc(it.mode||"")}</span>
+      </div>
+      ${it.url?`<div class="small"><a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.url)}</a></div>`:""}
+      <pre style="white-space:pre-wrap;font:inherit;font-size:13px;margin:8px 0 0">${esc(it.summary||"")}</pre>
+    </div>`).join("");
+  }catch(e){
+    list.innerHTML=`<div class="card small">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function esc(s){
+  return String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function paywallHtml(msg){
+  return `<div class="card paywall"><p style="margin:0 0 8px">${esc(msg||"Nullcloud Pro is required for this feature.")}</p>
+    <a class="buy" href="https://checkout.revolut.com/pay/d25ddfdd-7351-465b-afb6-c6238f65c575" target="_blank" rel="noopener">Get Pro — €19 one-time</a>
+    <a class="buy alt" href="https://checkout.revolut.com/pay/ee0aad48-1ff6-452b-9470-01ae6db706a4" target="_blank" rel="noopener">Remote setup — €30</a>
+    <a class="buy bundle" href="https://checkout.revolut.com/pay/c60fa94d-e094-4c1f-aac4-ae04c4776c52" target="_blank" rel="noopener">Pro + setup — €45</a>
+    <p class="pay-note">Pay via the link, then email Pozun.alen96@gmail.com with the payment confirmation. The license key is sent manually.</p>
+    <p class="pay-note">Tailscale private cloud (€60-80) and team consulting (from €250): contact Pozun.alen96@gmail.com for a quote.</p></div>`;
+}
+
+$("go").onclick=async()=>{
+  const token=$("token").value.trim(),lang=$("lang").value.trim(),out=$("out");
+  L.setItem("token",token);L.setItem("lang",lang);out.textContent="Working on-device (CPU + GPU)...";
+  const body={
+    url:$("url").value.trim(),
+    text:$("text").value.trim(),
+    mode:$("mode").value,
+    q:$("q").value,
+    lang,
+    gpu_layers:Number($("gpu-layers").value),
+    cpu_threads:Number($("cpu-threads").value)
+  };
+  if(pdfBase64){body.pdf_base64=pdfBase64;body.filename=pdfFilename;}
+  try{
+    const r=await fetch("/analyze",{method:"POST",headers:headers(),body:JSON.stringify(body)});
+    if(!r.ok){
+      const d=await r.json().catch(()=>({}));
+      if(r.status===402){out.innerHTML=paywallHtml(d.error);return;}
+      out.textContent=d.error||("Error "+r.status);return;
+    }
+    const rd=r.body.getReader(),dc=new TextDecoder();out.textContent="";
+    for(;;){const{done,value}=await rd.read();if(done)break;out.textContent+=dc.decode(value,{stream:true});}
+  }catch(e){out.textContent="Error: "+e.message;}
+};
+
+$("speak").onclick=()=>{if(speechSynthesis.speaking){speechSynthesis.cancel();return;}speechSynthesis.speak(new SpeechSynthesisUtterance($("out").textContent));};
+$("copy-btn").onclick=()=>navigator.clipboard.writeText($("out").textContent);
+$("last-btn").onclick=async()=>{
+  try{
+    const r=await fetch("/last",{headers:headers()});
+    const d=await r.json();
+    if(!r.ok){$("out").textContent=d.error||"No recent result.";return;}
+    $("out").textContent=d.output||"";
+    if(d.url)$("url").value=d.url;
+  }catch(e){$("out").textContent="Error: "+e.message;}
+};
+$("lib-search-btn").onclick=loadLibrary;
+$("preset-save-btn").onclick=async()=>{
+  const r=await fetch("/presets",{method:"POST",headers:headers(),body:JSON.stringify({
+    name:$("preset-name").value,category:$("preset-cat").value,prompt:$("preset-prompt").value
+  })});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){
+    if(r.status===402)$("preset-list").innerHTML=paywallHtml(d.error);
+    else alert(d.error||"Failed to save preset");
+    return;
+  }
+  $("preset-name").value="";$("preset-prompt").value="";
+  loadPresets();
+};
+$("hw-save-btn").onclick=async()=>{
+  const r=await fetch("/hardware",{method:"POST",headers:headers(),body:JSON.stringify({
+    gpu_layers:Number($("gpu-layers").value),
+    cpu_threads:Number($("cpu-threads").value),
+    flash_attn:true
+  })});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){$("hw-msg").textContent=d.error||"Enter your token above to save hardware settings.";return;}
+  $("hw-msg").textContent="Saved: "+d.compute.accel_summary;
+  refreshStatus();
+};
+$("activate-btn").onclick=async()=>{
+  const key=$("license-key").value.trim();
+  const r=await fetch("/pro/activate",{method:"POST",headers:headers(),body:JSON.stringify({key})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){$("pro-msg").textContent=d.error||"Activation failed.";return;}
+  L.setItem("license_key",key);
+  $("pro-msg").textContent="Pro license verified offline! All Pro features are now active.";
+  refreshStatus();
+};
+$("token").onchange=refreshStatus;
+setTimeout(refreshStatus,100);
+</script></body></html>

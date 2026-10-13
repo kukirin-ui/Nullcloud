@@ -1,0 +1,12 @@
+name: Feature Request
+description: Suggest an improvement for Nullcloud Free Core or Pro Hub
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Feature description
+      description: How does this improve the on-device, no cloud AI experience?
+    validations:
+      required: true

@@ -1,0 +1,22 @@
+name: Bug Report
+description: Report a bug in Nullcloud (server, Termux scripts, Web UI, or extension)
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the issue and which entry point you used (Share Sheet, Web UI, or Browser Extension).
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device, OS & RAM
+      placeholder: "e.g. Pixel 7a (8GB RAM, Termux F-Droid) or macOS 15 (Ollama)"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste output from `~/nullcloud-api.log` or `~/nullcloud-llm.log` (never include your token or license key).

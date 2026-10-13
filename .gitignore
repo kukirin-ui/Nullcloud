@@ -1,0 +1,30 @@
+# Python / Flask
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+
+# Nullcloud local runtime & secrets
+.nullcloud-token
+.nullcloud-pro.key
+.nullcloud-library.db
+.nullcloud-presets.json
+.nullcloud-compute.json
+.nullcloud-last.txt
+.nullcloud-last.json
+nullcloud-models/
+*.gguf
+*.gguf.part
+*.log
+*.pid
+
+# License private keys (NEVER commit private keys)
+tools/license/keys/private.pem
+*.pem
+*.key
+
+# OS / Editor
+.DS_Store
+Thumbs.db
