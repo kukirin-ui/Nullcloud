@@ -1,0 +1,61 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+:root{color-scheme:light dark}
+body{width:360px;margin:0;padding:12px;font:13.5px/1.45 system-ui,-apple-system,sans-serif}
+h3{margin:0 0 8px;font-size:15px;display:flex;justify-content:space-between;align-items:center}
+input,select,button{width:100%;box-sizing:border-box;margin:0 0 8px;padding:8px;border:1px solid #94a3b8;border-radius:6px;font:inherit}
+button{background:#0d9488;color:#fff;border:0;font-weight:600;cursor:pointer}
+button.sec{background:#475569;margin-top:6px}
+a.buy{display:block;text-align:center;text-decoration:none;background:#0d9488;color:#fff;border-radius:6px;padding:8px;margin:0 0 6px;font-weight:600}
+a.buy.alt{background:#0f766e}
+a.buy.bundle{background:#115e59}
+.pay-note{font-size:11px;opacity:.8;margin:6px 0 8px}
+.row{display:flex;gap:6px}
+.row > *{flex:1}
+#out{white-space:pre-wrap;max-height:280px;overflow:auto;padding:8px;border:1px solid #94a3b8;border-radius:6px;min-height:48px}
+small{opacity:.75;font-size:11px}
+details{margin-bottom:8px;font-size:12px}
+summary{cursor:pointer;opacity:.8;margin-bottom:6px}
+</style></head><body>
+<h3><span>Nullcloud <small>on-device, no cloud AI</small></span><small id="pro-pill">MIT Core</small></h3>
+<select id="mode">
+  <option value="summary">Summary</option>
+  <option value="facts">Key facts</option>
+  <option value="claims">Claims check</option>
+  <option value="eli5">Explain simply</option>
+  <option value="translate">Translate</option>
+  <option value="ask">Ask a question</option>
+  <option value="preset:legal-privilege">[Pro] Legal: Privilege &amp; Risk Scan</option>
+  <option value="preset:journalism-source">[Pro] Journalism: Source Verification</option>
+  <option value="preset:clinical-intake">[Pro] Clinical: De-Identified Summary</option>
+  <option value="preset:exec-brief">[Pro] Executive: 60s Action Brief</option>
+</select>
+<input id="q" placeholder="Your question about this page" style="display:none">
+<input id="lang" placeholder="Answer language (optional)">
+<input id="token" type="password" placeholder="Token (from setup/start script)">
+<details>
+  <summary>CPU / GPU, Private Cloud &amp; Pro Settings</summary>
+  <select id="gpu">
+    <option value="99">Compute: Full GPU + CPU (-ngl 99 · Vulkan/Metal/CUDA)</option>
+    <option value="16">Compute: Hybrid CPU + GPU (-ngl 16)</option>
+    <option value="0">Compute: CPU-Only (-ngl 0 · NEON/AVX2)</option>
+  </select>
+  <input id="api" placeholder="Server URL (default: http://127.0.0.1:8080)">
+  <input id="license" placeholder="Pro License Key (NULLCLOUD-... optional)">
+</details>
+<button id="go">Run on this page (works offline)</button>
+<div id="out">Select text on the page to analyze only that selection, or click Run for the full page.</div>
+<div id="pay">
+  <a class="buy" href="https://checkout.revolut.com/pay/d25ddfdd-7351-465b-afb6-c6238f65c575" target="_blank" rel="noopener">Get Pro — €19 one-time</a>
+  <a class="buy alt" href="https://checkout.revolut.com/pay/ee0aad48-1ff6-452b-9470-01ae6db706a4" target="_blank" rel="noopener">Remote setup — €30</a>
+  <a class="buy bundle" href="https://checkout.revolut.com/pay/c60fa94d-e094-4c1f-aac4-ae04c4776c52" target="_blank" rel="noopener">Pro + setup — €45</a>
+  <p class="pay-note">Pay via the link, then email Pozun.alen96@gmail.com with the payment confirmation. The license key is sent manually. Tailscale private cloud (€60-80) and team consulting (from €250): contact Pozun.alen96@gmail.com for a quote.</p>
+</div>
+<div class="row">
+  <button id="speak" class="sec">Read aloud</button>
+  <button id="copy" class="sec">Copy</button>
+  <button id="open-ui" class="sec">Hub UI</button>
+</div>
+<script src="popup.js"></script>
+</body></html>

@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Nullcloud - On-Device, No Cloud Page AI",
+  "version": "1.2.0",
+  "description": "Summarize, extract facts, or question any page using an AI model running on your own device or phone over Tailscale. No cloud AI.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": [
+    "http://127.0.0.1:8080/*",
+    "http://localhost:8080/*",
+    "http://100.*:8080/*",
+    "https://*.ts.net/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" }
+  },
+  "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "nullcloud@kukirin-ui.github.io",
+      "data_collection_permissions": { "required": ["none"] }
+    }
+  }
+}

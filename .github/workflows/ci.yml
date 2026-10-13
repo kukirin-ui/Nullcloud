@@ -1,0 +1,30 @@
+name: CI & QA Gate
+
+on:
+  push:
+    branches: ["main", "cursor/**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: Verify Server, Scripts, Extension & Offline Licensing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r server/requirements.txt pytest
+
+      - name: Run QA Gate & Pytest Suite
+        run: bash tools/qa/verify-all.sh
