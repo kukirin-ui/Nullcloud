@@ -23,7 +23,7 @@ for i in $(seq 1 "$RUNS"); do
 done
 read B1 T1 < <(bat)
 echo
-echo "== Nullcloud CPU + GPU benchmark =="
+echo "== Nullcloud GPU benchmark =="
 echo "model: ${MODEL_NAME:-local} | gpu: ${GPU_NAME:-Mobile GPU} (-ngl ${GPU_LAYERS:-99})"
 echo "runs: $RUNS  (each ~1,300-token page in, <=200 tokens out)"
 awk "BEGIN{printf \"end-to-end speed: %.1f tok/s (includes page reading)\n\", $TOK/$SEC}"
