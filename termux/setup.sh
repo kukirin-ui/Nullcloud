@@ -12,8 +12,8 @@ URL_1B="https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main
 MEM_KB="$(awk '/MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 6000000)"
 MEM_GB="$(awk "BEGIN{printf \"%.1f\", $MEM_KB / 1048576}")"
 
-# Auto-detect mobile GPU (Snapdragon Adreno, Arm Mali/Immortalis, Samsung Xclipse, or Vulkan ICD)
-GPU_NAME="Mobile GPU (Vulkan/OpenCL)"
+# Rough GPU guess from sysfs; replaced by llama.cpp's real Vulkan device name after install
+GPU_NAME="Mobile GPU (Vulkan)"
 if [ -r /sys/class/kgsl/kgsl-3d0/gpu_model ]; then
   GPU_NAME="Adreno $(tr -d '\0\r\n' < /sys/class/kgsl/kgsl-3d0/gpu_model)"
 elif [ -d /sys/class/misc/mali0 ] || [ -e /dev/mali0 ]; then
@@ -48,15 +48,20 @@ fi
 
 MODEL_URL="${MODEL_URL:-$DEFAULT_URL}"
 
-echo "== Nullcloud On-Device AI Setup (CPU + GPU Hybrid) =="
+echo "== Nullcloud On-Device AI Setup (GPU-first, Vulkan) =="
 echo "Detected RAM: ${MEM_GB} GB | GPU: ${GPU_NAME}"
 echo "Selecting ${MODEL_NAME} profile (run termux/bench.sh to measure speed)"
 
 pkg update -y && pkg upgrade -y
-pkg install -y python curl wget jq termux-api unzip poppler vulkan-loader-android 2>/dev/null || \
-  pkg install -y python curl wget jq termux-api unzip poppler
+pkg install -y python curl wget jq termux-api unzip poppler
 
-if [ "${BUILD_VULKAN:-0}" = "1" ]; then
+# Prefer the packaged llama.cpp with the Vulkan backend (no compiling needed).
+# vulkan-loader-android uses the phone's real GPU driver; vulkan-loader-generic does not.
+pkg uninstall -y vulkan-loader-generic 2>/dev/null || true
+pkg install -y vulkan-loader-android 2>/dev/null || true
+pkg install -y llama-cpp llama-cpp-backend-vulkan 2>/dev/null || pkg install -y llama-cpp 2>/dev/null || true
+
+if [ "${BUILD_VULKAN:-0}" = "1" ] || ! command -v llama-server >/dev/null; then
   echo "Building llama.cpp from source with Vulkan GPU acceleration (-DGGML_VULKAN=ON)..."
   pkg install -y git cmake clang vulkan-headers vulkan-loader-android shaderc
   SRC_DIR="$HOME/.cache/llama.cpp-vulkan"
@@ -65,9 +70,19 @@ if [ "${BUILD_VULKAN:-0}" = "1" ]; then
   cmake -S "$SRC_DIR" -B "$SRC_DIR/build" -DGGML_VULKAN=ON -DCMAKE_BUILD_TYPE=Release
   cmake --build "$SRC_DIR/build" --target llama-server -j"$(nproc 2>/dev/null || echo 4)"
   cp "$SRC_DIR/build/bin/llama-server" "$PREFIX/bin/llama-server"
-elif ! command -v llama-server >/dev/null; then
-  pkg install -y llama-cpp 2>/dev/null || pkg install -y llama.cpp 2>/dev/null || {
-    echo "!! llama.cpp package not found in your Termux repo. Run with BUILD_VULKAN=1 bash termux/setup.sh to build from source."; exit 1; }
+fi
+
+# Ask llama.cpp for the real GPU name (e.g. "Vulkan0: Samsung Xclipse 960 (...)" -> "Samsung Xclipse 960")
+detect_llama_gpu() {
+  command -v llama-server >/dev/null 2>&1 || return 0
+  llama-server --list-devices 2>/dev/null | sed -n 's/^[[:space:]]*Vulkan0:[[:space:]]*\(.*[^[:space:]]\)[[:space:]]*(.*/\1/p' | head -n 1
+}
+DETECTED_GPU="$(detect_llama_gpu)"
+if [ -n "$DETECTED_GPU" ]; then
+  GPU_NAME="$DETECTED_GPU"
+  echo "llama.cpp Vulkan device: $GPU_NAME"
+else
+  echo "!! llama.cpp sees no Vulkan GPU. Check with: llama-server --list-devices (see README Troubleshooting)"
 fi
 pip install -r "$ROOT/server/requirements.txt"
 
@@ -101,7 +116,7 @@ echo "$ROOT" > "$HOME/.nullcloud-root"
 echo
 echo "== Setup complete (On-Device, No Cloud AI) =="
 echo "Profile:     $MODEL_NAME (CTX=$CTX_SIZE, MAX_CHARS=$MAX_CHARS)"
-echo "Compute:     CPU (big.LITTLE + ARM NEON/dotprod) + GPU Offload ($GPU_NAME, -ngl $GPU_LAYERS)"
+echo "Compute:     GPU offload ($GPU_NAME, -ngl $GPU_LAYERS, Vulkan), THREADS=2 recommended"
 echo "Your token:  $(cat "$HOME/.nullcloud-token")"
 echo "Start:       bash $ROOT/termux/start.sh"
 echo "Entry points ready:"

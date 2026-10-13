@@ -112,7 +112,8 @@ code{font-family:ui-monospace,monospace;font-size:12px;background:var(--bg);padd
   <div class="card">
     <h3>CPU &amp; GPU Hardware Acceleration Tweaks</h3>
     <p class="small" style="margin:0 0 8px">Tune both <strong>GPU layer offload</strong> (Vulkan on Android, tested on Exynos; Metal / CUDA / ROCm on desktop) and thread count + quantized KV cache (<code>q8_0/q4_0</code>):</p>
-    <div id="hw-summary" class="small" style="margin-bottom:8px">Detecting local CPU + GPU engine...</div>
+    <div id="hw-summary" class="small" style="margin-bottom:8px">Detecting local GPU engine...</div>
+    <div class="small" style="margin-bottom:8px">Measured on Samsung Xclipse 960: prompt 206 t/s, generation 16.5 t/s (Qwen3 4B Q4_K_M). Recommended: 2 CPU threads with full GPU offload.</div>
     <div class="row">
       <div>
         <label class="small" for="gpu-layers"><strong>GPU Offload Layers (<code>-ngl</code>)</strong></label>

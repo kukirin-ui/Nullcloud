@@ -64,11 +64,17 @@
 
 ## Performance
 
-Tested on a Samsung Exynos phone using GPU offload (Vulkan, `BUILD_VULKAN=1`). Tune GPU offload layers (`-ngl`) in the Web UI (**Private Cloud & Services -> Hardware Tweaks**) or the browser extension.
+Tested on a Samsung Exynos phone (Xclipse 960 GPU) using GPU offload (Vulkan, packaged `llama-cpp-backend-vulkan`). Tune GPU offload layers (`-ngl`) in the Web UI (**Private Cloud & Services -> Hardware Tweaks**) or the browser extension.
 
-| Device | Model | tok/s | s/article | Battery / 20 articles | Temp change |
-|---|---|---|---|---|---|
-| Exynos phone, GPU (Vulkan) | Llama-3.2-3B Q4_K_M | measurements coming | measurements coming | measurements coming | measurements coming |
+Measured with `llama-bench -p 512 -n 32 -r 1` (Vulkan, `-ngl 99`) on a real phone:
+
+| GPU | Model | Threads | Prompt (pp512) | Generation (tg32) |
+|---|---|---|---|---|
+| Samsung Xclipse 960 (Exynos) | Qwen3 4B Q4_K_M | **2** | **206.50 t/s** | 15.03 t/s |
+| Samsung Xclipse 960 (Exynos) | Qwen3 4B Q4_K_M | 4 | 164.94 t/s | **16.53 t/s** |
+| Samsung Xclipse 960 (Exynos) | Qwen3 4B Q4_K_M | 8 | 149.42 t/s | 16.38 t/s |
+
+With full GPU offload, more CPU threads do not help: **`THREADS=2` is recommended** (fastest prompt reading, generation within 10%). `termux/start.sh` uses 2 threads by default when GPU offload is on; override with `THREADS=4 bash ~/nullcloud/termux/start.sh`.
 
 Measure your own device: run `bash termux/bench.sh 20` in Airplane Mode with the charger unplugged. It prints real end-to-end tok/s and seconds per article. PRs with your results are welcome.
 
@@ -147,7 +153,15 @@ Need turn-key deployment of **on-device, no cloud AI** for privileged legal disc
 - **Model download stopped halfway:** run setup again. Partial `*.gguf.part` files are resumed or replaced.
 - **Share -> Termux does nothing:** install **Termux:API** from F-Droid as well, run `pkg install -y termux-api`, and check that `~/bin/termux-url-opener` exists and is executable (`chmod +x ~/bin/termux-url-opener`).
 - **Generation stops when the screen turns off:** Android Settings -> Apps -> Termux -> Battery -> **Unrestricted**, and run `termux-wake-lock`.
-- **Slow or the GPU is not used:** rebuild with Vulkan: `BUILD_VULKAN=1 bash ~/nullcloud/setup.sh`. If it still fails, lower GPU layers in the Web UI hardware tweaks.
+- **GPU is not used (`llama-bench` shows backend `CPU`, or start.sh says "CPU fallback"):** install the Vulkan backend and the Android Vulkan loader:
+  ```bash
+  pkg install -y llama-cpp llama-cpp-backend-vulkan
+  pkg uninstall -y vulkan-loader-generic
+  pkg install -y vulkan-loader-android
+  llama-server --list-devices
+  ```
+  You should see a line like `Vulkan0: Samsung Xclipse 960 (...)`. If the package is not available, build from source: `BUILD_VULKAN=1 bash ~/nullcloud/setup.sh`.
+- **`llama-server` fails with a `--flash-attn` error:** newer llama.cpp needs a value (`--flash-attn on`). Update Nullcloud with `cd ~/nullcloud && git pull`; `start.sh` also falls back to GPU without Flash-Attention.
 - **Web UI says "Wrong token":** your token is in `~/.nullcloud-token`. Show it with `cat ~/.nullcloud-token` and paste it once in the Web UI.
 - **Port 8080 already in use:** `bash ~/nullcloud/termux/stop.sh`, then start again.
 
