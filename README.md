@@ -66,19 +66,19 @@
 
 Tested on a Samsung Exynos phone (Xclipse 960 GPU) using GPU offload (Vulkan, packaged `llama-cpp-backend-vulkan`). Tune GPU offload layers (`-ngl`) in the Web UI (**Private Cloud & Services -> Hardware Tweaks**) or the browser extension.
 
-Measured with `llama-bench -p 512 -n 32 -r 1` (Vulkan, `-ngl 99`) on a real phone:
+Measured with `llama-bench -p 512 -n 32 -r 1` (Vulkan, `-ngl 99`) inside the Meridian app Console on a real phone:
 
 | GPU | Model | Threads | Prompt (pp512) | Generation (tg32) |
 |---|---|---|---|---|
-| Samsung Xclipse 960 (Exynos) | Qwen3 4B Q4_K_M | **2** | **206.50 t/s** | 15.03 t/s |
-| Samsung Xclipse 960 (Exynos) | Qwen3 4B Q4_K_M | 4 | 164.94 t/s | **16.53 t/s** |
-| Samsung Xclipse 960 (Exynos) | Qwen3 4B Q4_K_M | 8 | 149.42 t/s | 16.38 t/s |
+| Samsung Xclipse 960 (Exynos) | Qwen3 4B Q4_K_M | **2** | **232.29 t/s** | **23.23 t/s** |
+| Samsung Xclipse 960 (Exynos) | Qwen3 4B Q4_K_M | 4 | 228.05 t/s | 21.92 t/s |
+| Samsung Xclipse 960 (Exynos) | Qwen3 4B Q4_K_M | 8 | 167.78 t/s | 13.79 t/s |
 
-![Real llama-bench run on Samsung Xclipse 960 (Vulkan), Qwen3 4B Q4_K_M](screenshots/bench-xclipse960.jpg)
+![Real llama-bench run inside the Meridian app Console on Samsung Xclipse 960 (Vulkan)](screenshots/bench-meridian-xclipse960.jpg)
 
-*Real llama-bench run on Samsung Xclipse 960 (Vulkan), Qwen3 4B Q4_K_M*
+*Real llama-bench run inside the Meridian app Console on Samsung Xclipse 960 (Vulkan)*
 
-With full GPU offload, more CPU threads do not help: **`THREADS=2` is recommended** (fastest prompt reading, generation within 10%). `termux/start.sh` uses 2 threads by default when GPU offload is on; override with `THREADS=4 bash ~/nullcloud/termux/start.sh`.
+With full GPU offload, more CPU threads do not help: **`THREADS=2` is recommended** (fastest prompt reading and generation). `termux/start.sh` uses 2 threads by default when GPU offload is on; override with `THREADS=4 bash ~/nullcloud/termux/start.sh`.
 
 Measure your own device: run `bash termux/bench.sh 20` in Airplane Mode with the charger unplugged. It prints real end-to-end tok/s and seconds per article. PRs with your results are welcome.
 

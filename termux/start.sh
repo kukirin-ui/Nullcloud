@@ -34,7 +34,7 @@ esac
 GPU_NAME="${GPU_NAME:-Mobile GPU (Vulkan)}"
 
 # Threads: with full GPU offload, 2 threads gave the best prompt speed in real tests
-# (Samsung Xclipse 960, Qwen3 4B Q4_K_M: 2 threads pp512 206.5 t/s, 4 threads 164.9, 8 threads 149.4).
+# (Samsung Xclipse 960, Qwen3 4B Q4_K_M: 2 threads pp512 232.3 / tg32 23.2 t/s, 4 threads 228.1 / 21.9, 8 threads 167.8 / 13.8).
 CORES="$(nproc 2>/dev/null || echo 4)"
 if [ "$GPU_LAYERS" -gt 0 ] 2>/dev/null; then
   DEFAULT_THREADS=2
