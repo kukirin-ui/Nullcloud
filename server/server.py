@@ -64,8 +64,7 @@ COMPUTE_FILE = pathlib.Path(os.environ.get("NULLCLOUD_COMPUTE_FILE", str(HOME_DI
 
 # Default P-256 SPKI public key for offline Pro license verification (override via NULLCLOUD_PUBKEY for custom builds)
 DEFAULT_LICENSE_PUBKEY = (
-    "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEuc4zK4+ZGpUSY/Qxb6RoRgim4UeP"
-    "W7GlkvdEmZ5rIapjL/7xQh9Ja38fEt2yx1M5t2l+R+6WmiUf0bZuhfkF2A=="
+    "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAET3VmbH67NuNHB6LllpF/T4Z8dREJzQYt7JRN5fXU1KRtUSlBMUov7Uq0Biqw/EhqAJpam9vQWU0DhFDDc8gCvw=="
 )
 LICENSE_PUBKEY = os.environ.get("NULLCLOUD_PUBKEY", DEFAULT_LICENSE_PUBKEY)
 
