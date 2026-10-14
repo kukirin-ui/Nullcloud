@@ -51,6 +51,7 @@ GPU_NAME = os.environ.get("GPU_NAME", "")
 ACCEL_MODE = os.environ.get("ACCEL_MODE", "")
 KV_CACHE = os.environ.get("KV_CACHE", "q8_0/q4_0")
 FLASH_ATTN = os.environ.get("FLASH_ATTN", "1") != "0"
+RECIPES_DIR = pathlib.Path(os.environ.get("NULLCLOUD_RECIPES_DIR", str(pathlib.Path.home() / "nullcloud-recipes")))
 NOTES_DIR = os.environ.get("NOTES_DIR", "")  # opt-in: save results as Markdown (e.g. an Obsidian vault folder)
 ARCHIVE = os.environ.get("ARCHIVE", "") == "1"  # opt-in: also keep the raw HTML next to each note
 
@@ -82,6 +83,13 @@ MODES = {
     "facts": "List the key facts, numbers, names and dates in the page as bullets. Add nothing that is not in the page.",
     "claims": "List the main claims the page makes. For each, say whether the page itself gives evidence for it. Stay neutral.",
     "translate": "Translate the main content of the page into {lang}.",
+    "recipe": (
+        "Turn the useful knowledge in the page into a short, practical recipe in Markdown. "
+        "Use exactly these sections: '# <Title>', '## Problem' (1-3 sentences), "
+        "'## Solution' (short numbered steps), '## Commands' (put EACH command in its own "
+        "separate ```bash code block; write 'None' if the page has no commands). "
+        "Use only what the page says. Do not add a source or date line."
+    ),
     "eli5": "Explain the page in simple words a 12-year-old would understand, in at most 6 sentences.",
 }
 
@@ -217,7 +225,7 @@ def find_cached_archive(url):
     return None
 
 
-def fetch_text_with_meta(url):
+def fetch_text_with_meta(url, timeout=20):
     current = url
     r = None
     try:
@@ -225,7 +233,7 @@ def fetch_text_with_meta(url):
             validate_public_url(current)
             r = requests.get(
                 current,
-                timeout=20,
+                timeout=timeout,
                 allow_redirects=False,
                 headers={"User-Agent": "Mozilla/5.0 (Nullcloud; on-device AI)"},
             )
@@ -333,6 +341,227 @@ def extract_pdf_text(pdf_bytes, max_pages=30):
     if text:
         return text
     raise ValueError("Could not extract readable text from PDF. Install poppler (`pkg install poppler`) or pypdf.")
+
+
+# --- Recipes (saved as Markdown in ~/nullcloud-recipes) ---
+def _slugify(s, fallback="recipe"):
+    s = re.sub(r"[^a-z0-9]+", "-", (s or "").lower()).strip("-")[:60].strip("-")
+    return s or fallback
+
+
+def save_recipe(url, title, output, sources=None):
+    """Save a recipe as <slug>.md without overwriting. Returns the path."""
+    body = output.strip()
+    m = re.search(r"^#\s+(.+)$", body, re.M)
+    rtitle = (m.group(1).strip() if m else "") or title or (urlparse(url).hostname if url else "") or "Recipe"
+    if not m:
+        body = f"# {rtitle}\n\n" + body
+    now = datetime.datetime.now()
+    srcs = sources or [url or "(pasted text)"]
+    body += "\n\n## Sources\n" + "\n".join(f"- {u}" for u in srcs) + f"\n\n## Date\n{now:%Y-%m-%d %H:%M}\n"
+    RECIPES_DIR.mkdir(parents=True, exist_ok=True)
+    slug = _slugify(rtitle)
+    path = RECIPES_DIR / f"{slug}.md"
+    n = 2
+    while path.exists():
+        path = RECIPES_DIR / f"{slug}-{n}.md"
+        n += 1
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+RECIPE_SPLIT = "===RECIPE==="
+SKIP_LINK = re.compile(
+    r"(login|log-in|signin|sign-in|signup|register|logout|account|privacy|terms|cookie|contact|"
+    r"careers|advertis|subscribe|newsletter|share|facebook\.com|twitter\.com|x\.com/intent|"
+    r"instagram\.com|linkedin\.com|tiktok\.com|pinterest|mailto:|javascript:|tel:|#)",
+    re.I,
+)
+SKIP_EXT = re.compile(r"\.(png|jpe?g|gif|webp|svg|ico|pdf|zip|gz|tar|apk|exe|mp4|mp3|webm|css|js|woff2?)(\?|$)", re.I)
+STOP = set("the a an and or of to in on for with is are be this that it as by at from how what your you".split())
+
+
+class _Links(HTMLParser):
+    """Collect <a href> + anchor text, skipping nav/header/footer/aside."""
+
+    SKIP_TAGS = {"nav", "header", "footer", "aside"}
+
+    def __init__(self):
+        super().__init__()
+        self.links, self.skip, self.cur = [], 0, None
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.SKIP_TAGS:
+            self.skip += 1
+        elif tag == "a" and not self.skip:
+            href = dict(attrs).get("href")
+            if href:
+                self.cur = [href, ""]
+
+    def handle_endtag(self, tag):
+        if tag in self.SKIP_TAGS and self.skip:
+            self.skip -= 1
+        elif tag == "a" and self.cur:
+            self.links.append((self.cur[0], self.cur[1].strip()))
+            self.cur = None
+
+    def handle_data(self, data):
+        if self.cur is not None:
+            self.cur[1] += data
+
+
+def _words(s):
+    return {w for w in re.findall(r"[a-z0-9]{3,}", (s or "").lower()) if w not in STOP}
+
+
+def rank_links(base_url, raw_html, topic, visited, limit):
+    """Same-domain + keyword-relevant links first. Deduped, nav/social/media skipped."""
+    p = _Links()
+    try:
+        p.feed(raw_html or "")
+    except Exception:  # noqa: BLE001
+        pass
+    host = (urlparse(base_url).hostname or "").lower()
+    tw = _words(topic)
+    seen, scored = set(visited), []
+    for i, (href, text) in enumerate(p.links):
+        u = urljoin(base_url, href.strip()).split("#")[0]
+        if not u.startswith(("http://", "https://")) or u in seen:
+            continue
+        if SKIP_EXT.search(u) or SKIP_LINK.search(href) or len(text) < 3:
+            continue
+        seen.add(u)
+        overlap = len(tw & (_words(text) | _words(urlparse(u).path)))
+        same = (urlparse(u).hostname or "").lower() == host
+        score = overlap * 3 + (2 if same else 0) - i * 0.001
+        if not same and overlap == 0:
+            continue  # off-site links only when clearly relevant
+        scored.append((score, u))
+    scored.sort(reverse=True)
+    return [u for _, u in scored[:limit]]
+
+
+def strip_think(t):
+    t = re.sub(r"<think>.*?</think>", "", t or "", flags=re.S)
+    return re.sub(r"<think>.*", "", t, flags=re.S).strip()
+
+
+def llm_complete(system, user, max_tokens, timeout=300):
+    payload = {
+        "model": MODEL,
+        "stream": False,
+        "chat_template_kwargs": {"enable_thinking": False},
+        "temperature": 0.2,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user + " /no_think"}],
+    }
+    r = requests.post(LLM_URL, json=payload, timeout=(5, timeout))
+    if r.status_code >= 400:
+        try:
+            err = r.json().get("error")
+            err = err.get("message") if isinstance(err, dict) else err
+        except ValueError:
+            err = r.text[:300]
+        raise RuntimeError(f"Model error ({r.status_code}): {err or 'unknown error'}")
+    return strip_think(r.json()["choices"][0]["message"].get("content") or "")
+
+
+def recipe_gen(url, title, text, raw, max_links=5, depth=1, ctx=2048):
+    """Sequential (thermal-friendly): main page + ranked child links -> facts -> merged recipe(s)."""
+    import time
+
+    start = time.time()
+    time_budget = int(os.environ.get("RECIPE_TIME_BUDGET", "600"))
+    char_budget = int(os.environ.get("RECIPE_CHAR_BUDGET", "40000"))
+    page_chars = max(800, (ctx - 300 - 200) * 3)  # one page per call fits the context
+    sys_facts = "You extract practical knowledge. Use only the PAGE text. Be brief."
+    yield ""
+    pages = [(url or "(pasted text)", title, text, raw)]
+    visited = {url} if url else set()
+    if url and max_links > 0:
+        queue = rank_links(url, raw, f"{title} {text[:300]}", visited, max_links)
+        if depth >= 2:
+            queue = queue[: max(1, max_links // 2)]
+        visited.update(queue)
+        total = len(queue)
+        yield f"> Found {total} relevant link(s) on the page.\n"
+        i = 0
+        while queue and len(pages) - 1 < max_links:
+            u = queue.pop(0)
+            i += 1
+            if time.time() - start > time_budget * 0.5 or sum(len(p[2]) for p in pages) > char_budget:
+                yield "> Time/size budget reached, skipping the remaining links.\n"
+                break
+            yield f"> Reading {i}/{total}: {u}\n"
+            try:
+                t, rw, tt = fetch_text_with_meta(u, timeout=10)
+            except Exception as e:  # noqa: BLE001
+                yield f">   skipped ({str(e)[:80]})\n"
+                continue
+            if len(t) < 200:
+                yield ">   skipped (no useful text)\n"
+                continue
+            pages.append((u, tt, t, rw))
+            if depth >= 2 and len(pages) - 1 + len(queue) < max_links:
+                more = rank_links(u, rw, f"{title} {tt}", visited, max_links - len(pages) + 1 - len(queue))
+                visited.update(more)
+                queue.extend(more)
+                total += len(more)
+    facts, used = [], []
+    for n, (u, tt, t, _) in enumerate(pages, 1):
+        if time.time() - start > time_budget:
+            yield "> Time budget reached, using what was read so far.\n"
+            break
+        yield f"> Extracting key facts {n}/{len(pages)}...\n"
+        try:
+            f = llm_complete(
+                sys_facts,
+                f"PAGE ({u}):\n{t[:page_chars]}\n\nTASK: List at most 8 key facts, steps and exact commands "
+                "from this page as short bullets. Copy commands exactly. If nothing useful, reply NONE.",
+                250,
+            )
+        except Exception as e:  # noqa: BLE001
+            yield f"[{e}. Try a shorter page or a larger context (CTX_SIZE).]\n"
+            if n == 1:
+                return
+            continue
+        if f and f.strip().upper() != "NONE":
+            facts.append(f"SOURCE {u}:\n{f}")
+            used.append(u)
+    if not facts:
+        yield "[The model returned no useful facts. Try another link or raise MAX_TOKENS.]"
+        return
+    yield f"> Writing recipe from {len(used)} source(s)...\n\n"
+    merged = "\n\n".join(facts)[: max(800, (ctx - MAX_TOKENS - 400) * 3)]
+    try:
+        out = llm_complete(
+            "You are a private on-device assistant. Use only the FACTS.",
+            f"FACTS:\n{merged}\n\nTASK: {MODES['recipe']} If the facts clearly cover different topics, "
+            f"write several recipes separated by a line containing only {RECIPE_SPLIT}.",
+            MAX_TOKENS,
+        )
+    except Exception as e:  # noqa: BLE001
+        yield f"[{e}]"
+        return
+    if not out:
+        yield "[The model returned no answer. Try again or raise MAX_TOKENS.]"
+        return
+    parts = [x.strip() for x in out.split(RECIPE_SPLIT) if x.strip()]
+    saved = []
+    for part in parts:
+        yield part + "\n\n"
+        try:
+            saved.append(save_recipe(url, title, part, sources=used))
+        except Exception as e:  # noqa: BLE001
+            yield f"[Could not save recipe: {e}]\n"
+    yield "Sources:\n" + "\n".join(f"- {u}" for u in used) + "\n"
+    for sp in saved:
+        yield f"\n[Recipe saved: {sp}]"
+    try:
+        LAST_RESULT_FILE.write_text(json.dumps({"url": url, "title": title, "mode": "recipe", "output": out,
+            "date": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 # --- Markdown Notes & SQLite FTS5 Library ---
@@ -736,6 +965,31 @@ def delete_library_item(item_id):
     return jsonify(ok=True)
 
 
+@app.get("/recipes")
+def list_recipes():
+    if not authorized():
+        return jsonify(error="Wrong or missing token."), 401
+    items = []
+    if RECIPES_DIR.is_dir():
+        for f in sorted(RECIPES_DIR.glob("*.md"), key=lambda x: x.stat().st_mtime, reverse=True):
+            items.append({"name": f.name, "path": str(f), "size": f.stat().st_size,
+                          "modified": datetime.datetime.fromtimestamp(f.stat().st_mtime).isoformat(timespec="seconds")})
+    return jsonify(dir=str(RECIPES_DIR), items=items)
+
+
+@app.get("/recipes/<name>")
+def get_recipe(name):
+    if not authorized():
+        return jsonify(error="Wrong or missing token."), 401
+    if not re.fullmatch(r"[a-z0-9-]+\.md", name):
+        return jsonify(error="Bad recipe name."), 400
+    f = RECIPES_DIR / name
+    if not f.is_file():
+        return jsonify(error="Recipe not found."), 404
+    return Response(f.read_text(encoding="utf-8"), mimetype="text/markdown; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
 @app.post("/analyze")
 def analyze():
     if not authorized():
@@ -801,6 +1055,18 @@ def analyze():
     ctx = int(compute.get("ctx_size") or CTX_SIZE)
     budget_tokens = max(256, ctx - MAX_TOKENS - 200 - len(task) // 3)
     page_text = text[: min(MAX_CHARS, budget_tokens * 3)]
+
+    if mode == "recipe":
+        try:
+            ml = max(0, min(8, int(d.get("max_links", 5))))
+            dp = 2 if str(d.get("depth", 1)) == "2" else 1
+        except (TypeError, ValueError):
+            ml, dp = 5, 1
+        return Response(
+            recipe_gen(d.get("url") or "", title, text, raw, ml, dp, ctx),
+            mimetype="text/plain; charset=utf-8",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     payload = {
         "model": MODEL,
