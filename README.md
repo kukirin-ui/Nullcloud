@@ -73,10 +73,15 @@ Measured with `llama-bench -p 512 -n 32 -r 1` (Vulkan, `-ngl 99`) inside the Mer
 | Samsung Xclipse 960 (Exynos) | Qwen3 4B Q4_K_M | **2** | **232.29 t/s** | **23.23 t/s** |
 | Samsung Xclipse 960 (Exynos) | Qwen3 4B Q4_K_M | 4 | 228.05 t/s | 21.92 t/s |
 | Samsung Xclipse 960 (Exynos) | Qwen3 4B Q4_K_M | 8 | 167.78 t/s | 13.79 t/s |
+| Samsung Xclipse 960 (Exynos) | Llama 3.2 3B Q4_K_M | **2** | **312.91 t/s** | **28.90 t/s** |
 
 ![Real llama-bench run inside the Meridian app Console on Samsung Xclipse 960 (Vulkan)](screenshots/bench-meridian-xclipse960.jpg)
 
 *Real llama-bench run inside the Meridian app Console on Samsung Xclipse 960 (Vulkan)*
+
+Bonus: Llama 3.2 3B (`-p 512 -n 128 -r 5`, 2 threads). It is faster than Qwen3 4B because it is a smaller model (3.2B vs 4B parameters); Qwen3 4B stays the pick for smarter answers and code.
+
+![Llama 3.2 3B llama-bench run inside the Meridian app Console on Samsung Xclipse 960 (Vulkan)](screenshots/bench-meridian-llama32-3b.jpg)
 
 With full GPU offload, more CPU threads do not help: **`THREADS=2` is recommended** (fastest prompt reading and generation). `termux/start.sh` uses 2 threads by default when GPU offload is on; override with `THREADS=4 bash ~/nullcloud/termux/start.sh`.
 
