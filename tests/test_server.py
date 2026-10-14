@@ -186,6 +186,10 @@ def test_recipe_mode_follows_links_and_saves(app_client, tmp_path, monkeypatch):
         out = app_client.post("/analyze", headers=h, json={"url": "https://ex.com/", "mode": "recipe"}).get_data(as_text=True)
         assert "Reading 1/1: https://ex.com/child" in out and "Recipe saved" in out
     names = [i["name"] for i in app_client.get("/recipes", headers=h).get_json()["items"]]
+    assert sorted(names) == ["vulkan-build.md"]  # same URL + mode overwrites, no -2 duplicate
+    assert "Resuming: 2/2 pages cached, 2/2 facts cached" in out
+    out = app_client.post("/analyze", headers=h, json={"url": "https://ex.com/", "mode": "recipe", "new_version": True}).get_data(as_text=True)
+    names = [i["name"] for i in app_client.get("/recipes", headers=h).get_json()["items"]]
     assert sorted(names) == ["vulkan-build-2.md", "vulkan-build.md"]
     md = app_client.get("/recipes/vulkan-build.md", headers=h).get_data(as_text=True)
     assert "- https://ex.com/child" in md and "## Date" in md
@@ -203,3 +207,63 @@ def test_recipe_max_mode_crawls_depth2_and_stop(app_client, tmp_path, monkeypatc
     out = app_client.post("/analyze", headers=h, json={"url": "https://ex.com/", "mode": "recipe", "crawl": "max"}).get_data(as_text=True)
     assert "Reading 12/12" in out and "Recipe saved" in out  # 3 children + 9 grandchildren
     assert app_client.post("/recipes/stop", headers=h).status_code == 200
+
+
+def test_recipe_background_job_interrupt_and_resume(app_client, tmp_path, monkeypatch):
+    """Job runs in a server thread; a stop mid-extraction then a re-run resumes from cache."""
+    import time
+    monkeypatch.setattr(server, "RECIPES_DIR", tmp_path / "recipes")
+    temp = tmp_path / "temp"
+    temp.write_text("345\n")
+    monkeypatch.setattr(server, "BATTERY_TEMP_FILE", str(temp))
+    links = "".join(f'<a href="/p{k}">vulkan build {k}</a>' for k in range(1, 6))
+    fetched, calls = [], []
+
+    def fetch(u, timeout=20):
+        fetched.append(u)
+        if u.endswith("/p3") and fetched.count(u) == 1:
+            return ("", "", "broken")  # empty first time -> must be re-fetched on resume
+        return ("Vulkan build text " * 30, links if u.endswith("ex.com/") else "", "Vulkan build")
+
+    def llm(s, u, m, timeout=300):
+        calls.append(u[:20])
+        if u.startswith("PAGE"):
+            if len(calls) == 3:
+                server.RECIPE_STOP["flag"] = True  # simulate interruption after 3 extractions
+            time.sleep(0.05)
+            return "- fact"
+        return "# Vulkan Build\nx"
+
+    monkeypatch.setattr(server, "fetch_text_with_meta", fetch)
+    monkeypatch.setattr(server, "llm_complete", llm)
+    h = {"X-Token": "test-secret-token-12345"}
+    body = {"url": "https://ex.com/", "mode": "recipe"}
+    r = app_client.post("/recipes/jobs", headers=h, json=body)
+    assert r.status_code == 200 and r.get_json()["status"] == "running"
+    for _ in range(100):
+        j = app_client.get("/recipes/jobs/current", headers=h).get_json()
+        if j["status"] != "running":
+            break
+        time.sleep(0.05)
+    assert j["status"] == "stopped" and "KB/s" in j["live"]["speed"] and j["live"]["temp"] == "34.5°C"
+    assert "KB/s" not in j["text"] and "°C" not in j["text"]  # live bar only, not in the log
+    assert "skipped (no useful text)" in j["text"]
+    first_fetches = len(fetched)
+    r = app_client.post("/recipes/jobs", headers=h, json=body)
+    for _ in range(100):
+        j = app_client.get("/recipes/jobs/current", headers=h).get_json()
+        if j["status"] != "running":
+            break
+        time.sleep(0.05)
+    assert j["status"] == "done", j["text"]
+    assert "Resuming: 5/6 pages cached, 3/6 facts cached" in j["text"]
+    assert fetched[first_fetches:] == ["https://ex.com/p3"]  # only the broken page re-fetched
+    assert j["text"].count("Key facts") == 3
+    names = [i["name"] for i in app_client.get("/recipes", headers=h).get_json()["items"]]
+    assert names == ["vulkan-build.md"]
+
+
+def test_battery_temp_fallback(monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "BATTERY_TEMP_FILE", str(tmp_path / "missing"))
+    monkeypatch.setattr(server.shutil, "which", lambda n: None)
+    assert server.battery_temp() == "n/a"
