@@ -17,6 +17,7 @@ Productivity Hub & Private Cloud (also free, no license needed):
 """
 import base64
 import datetime
+import hashlib
 import hmac
 import ipaddress
 import json
@@ -29,6 +30,9 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
+import time
+import uuid
 import zlib
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
@@ -349,8 +353,8 @@ def _slugify(s, fallback="recipe"):
     return s or fallback
 
 
-def save_recipe(url, title, output, sources=None):
-    """Save a recipe as <slug>.md without overwriting. Returns the path."""
+def save_recipe(url, title, output, sources=None, path=None):
+    """Save a recipe as <slug>.md (new name, never clobbering) or overwrite `path`. Returns the path."""
     body = output.strip()
     m = re.search(r"^#\s+(.+)$", body, re.M)
     rtitle = (m.group(1).strip() if m else "") or title or (urlparse(url).hostname if url else "") or "Recipe"
@@ -360,6 +364,9 @@ def save_recipe(url, title, output, sources=None):
     srcs = sources or [url or "(pasted text)"]
     body += "\n\n## Sources\n" + "\n".join(f"- {u}" for u in srcs) + f"\n\n## Date\n{now:%Y-%m-%d %H:%M}\n"
     RECIPES_DIR.mkdir(parents=True, exist_ok=True)
+    if path is not None:
+        pathlib.Path(path).write_text(body, encoding="utf-8")
+        return pathlib.Path(path)
     slug = _slugify(rtitle)
     path = RECIPES_DIR / f"{slug}.md"
     n = 2
@@ -467,10 +474,134 @@ def llm_complete(system, user, max_tokens, timeout=300):
 
 
 RECIPE_STOP = {"flag": False}
+RECIPE_LIVE = {"speed": "", "size": ""}  # live status bar (not written into the log)
+BATTERY_TEMP_FILE = os.environ.get("BATTERY_TEMP_FILE", "/sys/class/power_supply/battery/temp")
+FETCH_LIMIT = 2_000_000
 
 
-def recipe_gen(url, title, text, raw, max_links=5, depth=1, ctx=2048, crawl="balanced"):
-    """Sequential (thermal-friendly): main page + ranked child links -> facts -> merged recipe(s)."""
+def battery_temp():
+    """Battery temperature as text: sysfs (tenths of °C), then termux-battery-status, else 'n/a'."""
+    try:
+        v = float(pathlib.Path(BATTERY_TEMP_FILE).read_text().strip())
+        return f"{v / 10 if abs(v) > 200 else v:.1f}°C"
+    except Exception:  # noqa: BLE001
+        pass
+    if shutil.which("termux-battery-status"):
+        try:
+            out = subprocess.run(["termux-battery-status"], capture_output=True, text=True, timeout=5).stdout
+            t = json.loads(out).get("temperature")
+            if t is not None:
+                return f"{float(t):.1f}°C"
+        except Exception:  # noqa: BLE001
+            pass
+    return "n/a"
+
+
+def _h(s):
+    return hashlib.sha1((s or "").encode("utf-8", "ignore")).hexdigest()[:16]
+
+
+class RecipeCache:
+    """Per-URL cache: ~/nullcloud-recipes/.cache/<hash>/{pages,facts}/ + state.json."""
+
+    def __init__(self, key):
+        self.dir = RECIPES_DIR / ".cache" / _h(key)
+        (self.dir / "pages").mkdir(parents=True, exist_ok=True)
+        (self.dir / "facts").mkdir(parents=True, exist_ok=True)
+        self.state_file = self.dir / "state.json"
+        try:
+            self.state = json.loads(self.state_file.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            self.state = {}
+        self.state.setdefault("url", key)
+        self.state.setdefault("recipes", {})
+
+    def save_state(self, **kw):
+        self.state.update(kw)
+        self.state["updated"] = datetime.datetime.now().isoformat(timespec="seconds")
+        try:
+            tmp = self.state_file.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self.state), encoding="utf-8")
+            tmp.replace(self.state_file)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def get_page(self, u):
+        """Return (text, raw, title) only if the cached copy is valid (not failed/empty/truncated)."""
+        try:
+            d = json.loads((self.dir / "pages" / f"{_h(u)}.json").read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            return None
+        if d.get("url") != u or d.get("truncated") or len(d.get("text") or "") < 200:
+            return None
+        return d["text"], d.get("raw") or "", d.get("title") or ""
+
+    def put_page(self, u, text, raw, title, truncated):
+        try:
+            (self.dir / "pages" / f"{_h(u)}.json").write_text(json.dumps(
+                {"url": u, "title": title, "text": text, "raw": raw, "truncated": truncated}), encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def get_facts(self, u, key):
+        f = self.dir / "facts" / f"{_h(u + '|' + key)}.txt"
+        return f.read_text(encoding="utf-8") if f.is_file() else None
+
+    def put_facts(self, u, key, facts):
+        try:
+            (self.dir / "facts" / f"{_h(u + '|' + key)}.txt").write_text(facts, encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _fetch_cached(cache, u, timeout):
+    """Returns (text, raw, title, cached, info_line)."""
+    import time
+
+    c = cache.get_page(u)
+    if c:
+        RECIPE_LIVE.update(speed="cached", size="")
+        return (*c, True, ">   cached\n")
+    t0 = time.time()
+    t, rw, tt = fetch_text_with_meta(u, timeout=timeout)
+    dt = max(time.time() - t0, 0.001)
+    size = len((rw or t or "").encode("utf-8", "ignore"))
+    truncated = len(rw or "") >= FETCH_LIMIT
+    cache.put_page(u, t, rw, tt, truncated)
+    RECIPE_LIVE.update(speed=f"{size / 1024 / dt:.1f} KB/s", size=f"{size / 1024:.1f} KB")
+    info = ">   truncated, will re-fetch next time\n" if truncated else ""
+    return t, rw, tt, False, info
+
+
+def _llm_with_heartbeat(system, user, max_tokens, every=None):
+    """Run llm_complete in a thread; yield heartbeat lines (with battery temp) while it works.
+    The final yielded item is ('result', value) or ('error', exc)."""
+    import queue as _q
+    import threading as _t
+
+    every = every or float(os.environ.get("RECIPE_HEARTBEAT", "30"))
+    q = _q.Queue()
+    _t.Thread(target=lambda: q.put(_try(lambda: llm_complete(system, user, max_tokens))), daemon=True).start()
+    waited = 0
+    while True:
+        try:
+            yield q.get(timeout=every)
+            return
+        except _q.Empty:
+            waited += every
+            yield ""  # keeps the job loop alive; temp shown in the live status bar
+
+
+def _try(fn):
+    try:
+        return ("result", fn())
+    except Exception as e:  # noqa: BLE001
+        return ("error", e)
+
+
+def recipe_gen(url, title, text, raw, max_links=5, depth=1, ctx=2048, crawl="balanced", new_version=False):
+    """Sequential (thermal-friendly): main page + ranked child links -> facts -> merged recipe(s).
+    Everything is cached per URL so a second run resumes instead of starting over."""
     import time
 
     start = time.time()
@@ -483,6 +614,23 @@ def recipe_gen(url, title, text, raw, max_links=5, depth=1, ctx=2048, crawl="bal
     page_chars = max(800, (ctx - 300 - 200) * 3)  # one page per call fits the context
     sys_facts = "You extract practical knowledge. Use only the PAGE text. Be brief."
     yield ""
+    cache = RecipeCache(url or ("text:" + _h(text)))
+    cached_pages = 0
+    if url and not text:
+        yield f"> Reading main page: {url}\n"
+        try:
+            text, raw, ftitle, was_cached, info = _fetch_cached(cache, url, 20)
+        except Exception as e:  # noqa: BLE001
+            yield f"[Could not read URL: {e}]"
+            cache.save_state(step="error")
+            return
+        yield info
+        cached_pages += was_cached
+        title = title or ftitle
+        if len(text) < 20:
+            yield "[No text to analyze.]"
+            return
+    cache.save_state(step="crawling", crawl=crawl, title=title)
     pages = [(url or "(pasted text)", title, text, raw)]
     visited = {url} if url else set()
     if url and max_links > 0:
@@ -505,37 +653,55 @@ def recipe_gen(url, title, text, raw, max_links=5, depth=1, ctx=2048, crawl="bal
                 break
             yield f"> Reading {i}/{total}: {u}\n"
             try:
-                t, rw, tt = fetch_text_with_meta(u, timeout=10)
+                t, rw, tt, was_cached, info = _fetch_cached(cache, u, 10)
             except Exception as e:  # noqa: BLE001
                 yield f">   skipped ({str(e)[:80]})\n"
                 continue
+            yield info
             if len(t) < 200:
                 yield ">   skipped (no useful text)\n"
                 continue
+            cached_pages += was_cached
             pages.append((u, tt, t, rw))
             if lvl < depth and len(pages) - 1 + len(queue) < max_links:
                 more = rank_links(u, rw, f"{title} {tt}", visited, max_links - len(pages) + 1 - len(queue))
                 visited.update(more)
                 queue.extend((m, lvl + 1) for m in more)
                 total += len(more)
+    fkey = f"{page_chars}"
+    cached_facts = sum(1 for p in pages if cache.get_facts(p[0], fkey) is not None)
+    if cached_pages or cached_facts:
+        yield f"> Resuming: {cached_pages}/{len(pages)} pages cached, {cached_facts}/{len(pages)} facts cached.\n"
+    cache.save_state(step="extracting", pages=[p[0] for p in pages])
     facts, used = [], []
     for n, (u, tt, t, _) in enumerate(pages, 1):
         if time.time() - start > time_budget or (RECIPE_STOP["flag"] and facts):
             yield "> Stopped/time budget reached, using what was read so far.\n"
             break
-        yield f"> Extracting key facts {n}/{len(pages)}...\n"
-        try:
-            f = llm_complete(
+        f = cache.get_facts(u, fkey)
+        if f is not None:
+            yield f"> Key facts {n}/{len(pages)}: cached\n"
+        else:
+            yield f"> Extracting key facts {n}/{len(pages)}...\n"
+            res = None
+            for item in _llm_with_heartbeat(
                 sys_facts,
                 f"PAGE ({u}):\n{t[:page_chars]}\n\nTASK: List at most 8 key facts, steps and exact commands "
                 "from this page as short bullets. Copy commands exactly. If nothing useful, reply NONE.",
                 250,
-            )
-        except Exception as e:  # noqa: BLE001
-            yield f"[{e}. Try a shorter page or a larger context (CTX_SIZE).]\n"
-            if n == 1:
-                return
-            continue
+            ):
+                if isinstance(item, tuple):
+                    res = item
+                else:
+                    yield item
+            if res[0] == "error":
+                yield f"[{res[1]}. Try a shorter page or a larger context (CTX_SIZE).]\n"
+                if n == 1:
+                    cache.save_state(step="error")
+                    return
+                continue
+            f = res[1] or ""
+            cache.put_facts(u, fkey, f)
         if f and f.strip().upper() != "NONE":
             facts.append(f"SOURCE {u}:\n{f}")
             used.append(u)
@@ -543,6 +709,7 @@ def recipe_gen(url, title, text, raw, max_links=5, depth=1, ctx=2048, crawl="bal
         yield "[The model returned no useful facts. Try another link or raise MAX_TOKENS.]"
         return
     yield f"> Writing recipe from {len(used)} source(s)...\n\n"
+    cache.save_state(step="writing")
     limit = max(800, (ctx - MAX_TOKENS - 400) * 3)
     rnd = 0
     while len("\n\n".join(facts)) > limit and len(facts) > 1 and rnd < 4:
@@ -580,12 +747,17 @@ def recipe_gen(url, title, text, raw, max_links=5, depth=1, ctx=2048, crawl="bal
         return
     parts = [x.strip() for x in out.split(RECIPE_SPLIT) if x.strip()]
     saved = []
-    for part in parts:
+    prev = [] if new_version else list(cache.state["recipes"].get(crawl) or [])
+    for idx, part in enumerate(parts):
         yield part + "\n\n"
         try:
-            saved.append(save_recipe(url, title, part, sources=used))
+            target = RECIPES_DIR / prev[idx] if idx < len(prev) and re.fullmatch(r"[a-z0-9-]+\.md", prev[idx]) else None
+            saved.append(save_recipe(url, title, part, sources=used, path=target))
         except Exception as e:  # noqa: BLE001
             yield f"[Could not save recipe: {e}]\n"
+    if saved:
+        cache.state["recipes"][crawl] = [p.name for p in saved]
+    cache.save_state(step="done")
     yield "Sources:\n" + "\n".join(f"- {u}" for u in used) + "\n"
     for sp in saved:
         yield f"\n[Recipe saved: {sp}]"
@@ -1030,6 +1202,121 @@ def stop_recipe():
     return jsonify(ok=True)
 
 
+# --- Recipe background jobs (run in a server thread; the browser only polls) ---
+JOBS = {}
+JOBS_LOCK = threading.Lock()
+CURRENT_JOB = {"id": None}
+
+
+def _job_file():
+    return RECIPES_DIR / ".cache" / "last-job.json"
+
+
+def _job_public(j):
+    live = {"speed": RECIPE_LIVE.get("speed") or "n/a", "size": RECIPE_LIVE.get("size") or "", "temp": battery_temp()}
+    return {k: j.get(k) for k in ("id", "url", "crawl", "status", "started", "finished")} | {"text": "".join(j["log"]), "live": live}
+
+
+def _persist_job(j):
+    try:
+        _job_file().parent.mkdir(parents=True, exist_ok=True)
+        _job_file().write_text(json.dumps(_job_public(j)), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _run_job(j, gen):
+    last = 0.0
+    try:
+        for chunk in gen:
+            if chunk:
+                j["log"].append(chunk)
+            if time.time() - last > 2:
+                _persist_job(j)
+                last = time.time()
+        j["status"] = "stopped" if RECIPE_STOP["flag"] else "done"
+    except Exception as e:  # noqa: BLE001
+        j["log"].append(f"\n[Job failed: {e}]")
+        j["status"] = "error"
+    j["finished"] = datetime.datetime.now().isoformat(timespec="seconds")
+    _persist_job(j)
+
+
+def start_recipe_job(url, title, text, raw, ml, dp, ctx, crawl, new_version):
+    """Start (or attach to) the single recipe job. Returns (job, error)."""
+    with JOBS_LOCK:
+        cur = JOBS.get(CURRENT_JOB["id"])
+        if cur and cur["status"] == "running":
+            if cur["url"] == url and cur["crawl"] == crawl:
+                return cur, None
+            return cur, "Another recipe job is running. Stop it first."
+        j = {"id": uuid.uuid4().hex[:12], "url": url, "crawl": crawl, "status": "running", "log": [],
+             "started": datetime.datetime.now().isoformat(timespec="seconds"), "finished": None}
+        JOBS.clear()
+        JOBS[j["id"]] = j
+        CURRENT_JOB["id"] = j["id"]
+        RECIPE_STOP["flag"] = False
+    gen = recipe_gen(url, title, text, raw, ml, dp, ctx, crawl, new_version)
+    t = threading.Thread(target=_run_job, args=(j, gen), daemon=True)
+    j["thread"] = t
+    t.start()
+    return j, None
+
+
+def _recipe_args(d, ctx):
+    try:
+        ml = max(0, min(8, int(d.get("max_links", 5))))
+        dp = 2 if str(d.get("depth", 1)) == "2" else 1
+    except (TypeError, ValueError):
+        ml, dp = 5, 1
+    return ml, dp, "max" if d.get("crawl") == "max" else "balanced", bool(d.get("new_version"))
+
+
+@app.post("/recipes/jobs")
+def create_recipe_job():
+    if not authorized():
+        return jsonify(error="Wrong or missing token."), 401
+    d = request.get_json(force=True, silent=True) or {}
+    url, text = (d.get("url") or "").strip(), (d.get("text") or "").strip()
+    if not url and len(text) < 20:
+        return jsonify(error="No text to analyze."), 400
+    ctx = int(get_compute_config().get("ctx_size") or CTX_SIZE)
+    ml, dp, crawl, nv = _recipe_args(d, ctx)
+    j, err = start_recipe_job(url, (d.get("title") or "").strip(), text, "", ml, dp, ctx, crawl, nv)
+    if err:
+        return jsonify(error=err, job=_job_public(j)), 409
+    return jsonify(_job_public(j))
+
+
+@app.get("/recipes/jobs/current")
+def current_recipe_job():
+    if not authorized():
+        return jsonify(error="Wrong or missing token."), 401
+    j = JOBS.get(CURRENT_JOB["id"])
+    if j:
+        return jsonify(_job_public(j))
+    try:
+        d = json.loads(_job_file().read_text(encoding="utf-8"))
+        if d.get("status") == "running":
+            d["status"] = "interrupted"  # server restarted mid-job; run the same link again to resume
+        return jsonify(d)
+    except Exception:  # noqa: BLE001
+        return jsonify(status="none")
+
+
+def _tail_job(j):
+    """Stream a job's log to an HTTP client. Disconnecting does not stop the job."""
+    n = 0
+    while True:
+        log = j["log"]
+        while n < len(log):
+            yield log[n]
+            n += 1
+        if j["status"] != "running" and n >= len(j["log"]):
+            return
+        time.sleep(0.2)
+
+
 @app.post("/analyze")
 def analyze():
     if not authorized():
@@ -1039,6 +1326,18 @@ def analyze():
     text = (d.get("text") or "").strip()
     raw = ""
     title = (d.get("title") or "").strip()
+
+    if d.get("mode") == "recipe" and not d.get("pdf_base64"):
+        ctx = int(get_compute_config().get("ctx_size") or CTX_SIZE)
+        ml, dp, crawl, nv = _recipe_args(d, ctx)
+        url = (d.get("url") or "").strip()
+        if not url and len(text) < 20:
+            return jsonify(error="No text to analyze."), 400
+        j, err = start_recipe_job(url, title, text, "", ml, dp, ctx, crawl, nv)
+        if err:
+            return jsonify(error=err), 409
+        return Response(_tail_job(j), mimetype="text/plain; charset=utf-8",
+                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     # PDF input (base64 encoded PDF bytes)
     if d.get("pdf_base64"):
@@ -1096,18 +1395,13 @@ def analyze():
     budget_tokens = max(256, ctx - MAX_TOKENS - 200 - len(task) // 3)
     page_text = text[: min(MAX_CHARS, budget_tokens * 3)]
 
-    if mode == "recipe":
-        try:
-            ml = max(0, min(8, int(d.get("max_links", 5))))
-            dp = 2 if str(d.get("depth", 1)) == "2" else 1
-        except (TypeError, ValueError):
-            ml, dp = 5, 1
-        return Response(
-            recipe_gen(d.get("url") or "", title, text, raw, ml, dp, ctx,
-                       "max" if d.get("crawl") == "max" else "balanced"),
-            mimetype="text/plain; charset=utf-8",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
+    if mode == "recipe":  # PDF input: run as a background job on the extracted text
+        ml, dp, crawl, nv = _recipe_args(d, ctx)
+        j, err = start_recipe_job(d.get("url") or "", title, text, raw, ml, dp, ctx, crawl, nv)
+        if err:
+            return jsonify(error=err), 409
+        return Response(_tail_job(j), mimetype="text/plain; charset=utf-8",
+                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     payload = {
         "model": MODEL,

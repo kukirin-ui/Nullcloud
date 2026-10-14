@@ -64,6 +64,7 @@ code{font-family:ui-monospace,monospace;font-size:12px;background:var(--bg);padd
   <div id="recipe-opts" class="small" style="display:none;margin:6px 0">
     Crawl <select id="crawl" style="width:auto"><option value="balanced">Balanced</option><option value="max">Max</option></select>
     <button id="stop-btn" type="button" style="width:auto">Stop</button>
+    <label style="display:inline"><input id="new-version" type="checkbox" style="width:auto"> New version</label>
     <span id="max-warn" style="display:none;color:#c60"> Max reads up to 50 pages (depth 2). It takes long and heats the phone. Stop keeps what was read.</span><br>
     Follow links: max <input id="max-links" type="number" min="0" max="8" value="5" style="width:60px">
     depth <select id="depth" style="width:auto"><option value="1">1</option><option value="2">2</option></select>
@@ -71,6 +72,7 @@ code{font-family:ui-monospace,monospace;font-size:12px;background:var(--bg);padd
   <input id="q" class="hide" placeholder="Your question about this page / document">
   <input id="lang" placeholder="Answer language (optional, e.g. Spanish)">
   <button id="go">Run On-Device</button>
+  <div id="job-bar" class="small" style="display:none;position:sticky;top:0;z-index:2;background:#222;color:#fff;padding:4px 8px;border-radius:6px;margin-top:6px"></div>
   <div id="out">Output appears here. Small local models (1B/3B) run fast on your device but may make mistakes—verify critical facts.</div>
   <div class="row" style="margin-top:10px">
     <button id="speak" class="sec">Read aloud / stop</button>
@@ -299,6 +301,16 @@ $("go").onclick=async()=>{
     crawl:$("crawl").value
   };
   if(pdfBase64){body.pdf_base64=pdfBase64;body.filename=pdfFilename;}
+  if(body.mode==="recipe"&&!pdfBase64){
+    body.new_version=$("new-version").checked;
+    try{
+      const r=await fetch("/recipes/jobs",{method:"POST",headers:headers(),body:JSON.stringify(body)});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok){out.textContent=(d.error||("Error "+r.status))+(d.job?"\n\n"+d.job.text:"");if(d.job&&d.job.status==="running")pollJob();return;}
+      showJob(d);pollJob();
+    }catch(e){out.textContent="Error: "+e.message;}
+    return;
+  }
   try{
     const r=await fetch("/analyze",{method:"POST",headers:headers(),body:JSON.stringify(body)});
     if(!r.ok){
@@ -326,6 +338,35 @@ $("last-btn").onclick=async()=>{
 $("lib-search-btn").onclick=loadLibrary;
 $("crawl").onchange=()=>{$("max-warn").style.display=$("crawl").value==="max"?"inline":"none";};
 $("stop-btn").onclick=()=>fetch("/recipes/stop",{method:"POST",headers:headers()});
+let jobTimer=null;
+function showJob(d){
+  if(!d||!d.id)return;
+  const st={running:"Running in the background (you can leave this page)",done:"Done",stopped:"Stopped",error:"Error",interrupted:"Interrupted (server restarted). Run the same link again to resume from cache."}[d.status]||d.status;
+  const out=$("out"),atEnd=out.scrollTop+out.clientHeight>=out.scrollHeight-20;
+  const lv=d.live||{},bar=$("job-bar");
+  bar.style.display=d.status==="running"?"block":"none";
+  bar.textContent=`⬇ ${lv.speed||"n/a"}${lv.size?" ("+lv.size+")":""} · 🌡 Battery ${lv.temp||"n/a"}`;
+  out.textContent=`[Recipe job ${d.id} · ${d.crawl||""} · ${st}]\n${d.url||""}\n\n`+(d.text||"");
+  if(atEnd)out.scrollTop=out.scrollHeight;
+}
+async function pollJob(){
+  clearTimeout(jobTimer);
+  try{
+    const r=await fetch("/recipes/jobs/current",{headers:headers()});const d=await r.json();
+    if(r.ok&&d.id){showJob(d);if(d.status==="running"){jobTimer=setTimeout(pollJob,1500);return;}}
+  }catch(e){jobTimer=setTimeout(pollJob,4000);}
+}
+async function reattachJob(){
+  try{
+    const r=await fetch("/recipes/jobs/current",{headers:headers()});const d=await r.json();
+    if(!r.ok||!d.id)return;
+    $("mode").value="recipe";$("recipe-opts").style.display="block";
+    if(d.url&&!$("url").value)$("url").value=d.url;
+    showJob(d);if(d.status==="running")pollJob();
+  }catch(e){}
+}
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)reattachJob();});
+reattachJob();
 $("mode").addEventListener("change",()=>{$("recipe-opts").style.display=$("mode").value==="recipe"?"block":"none";});
 async function loadRecipes(){
   const box=$("recipe-list");if(!box)return;
