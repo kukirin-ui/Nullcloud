@@ -21,7 +21,7 @@
    - **Web UI & Productivity Hub** (`http://127.0.0.1:8080` — works in any browser)
    - **Browser Extension** (Chrome, Brave, Edge, Firefox)
 4. **GPU Offload on Android (Vulkan):**
-   `termux/setup.sh` checks `/proc/meminfo`, picks `Llama-3.2-1B-Instruct Q4_K_M` (under ~5.5 GB RAM) or `Llama-3.2-3B-Instruct Q4_K_M` (6 GB+), and offloads layers to the GPU (`-ngl 99`). Tested on a Samsung **Exynos** phone with **GPU (Vulkan)**. Other phones may work but are not tested yet.
+   `termux/setup.sh` checks `/proc/meminfo`, picks a default model by RAM (Llama 3.2 **1B** under ~5.5 GB, Llama 3.2 **3B** on 6 GB+, both Q4_K_M), or uses your own GGUF (e.g. Qwen3 4B) if you link it to `~/nullcloud-models/model.gguf`, and offloads layers to the GPU (`-ngl 99`). Tested on a Samsung **Exynos** phone with **GPU (Vulkan)**. Other phones may work but are not tested yet.
 5. **Everything Is Free:** Library, PDF input, presets and Private Cloud are free for everyone. No license key, no paywall.
 
 ---
