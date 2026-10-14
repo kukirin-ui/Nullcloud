@@ -189,3 +189,17 @@ def test_recipe_mode_follows_links_and_saves(app_client, tmp_path, monkeypatch):
     assert sorted(names) == ["vulkan-build-2.md", "vulkan-build.md"]
     md = app_client.get("/recipes/vulkan-build.md", headers=h).get_data(as_text=True)
     assert "- https://ex.com/child" in md and "## Date" in md
+
+
+def test_recipe_max_mode_crawls_depth2_and_stop(app_client, tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "RECIPES_DIR", tmp_path / "recipes")
+    def fetch(u, timeout=20):
+        n = int(u.rsplit("/", 1)[-1] or 0) if u.rsplit("/", 1)[-1].isdigit() else 0
+        links = "".join(f'<a href="/{n*10+k}">vulkan build {k}</a>' for k in range(1, 4))
+        return ("Vulkan build text " * 30, links, f"Vulkan build {n}")
+    monkeypatch.setattr(server, "fetch_text_with_meta", fetch)
+    monkeypatch.setattr(server, "llm_complete", lambda s, u, m, timeout=300: "- fact" if not u.startswith("FACTS") or "Merge" in u else "# Vulkan Build\nx")
+    h = {"X-Token": "test-secret-token-12345"}
+    out = app_client.post("/analyze", headers=h, json={"url": "https://ex.com/", "mode": "recipe", "crawl": "max"}).get_data(as_text=True)
+    assert "Reading 12/12" in out and "Recipe saved" in out  # 3 children + 9 grandchildren
+    assert app_client.post("/recipes/stop", headers=h).status_code == 200

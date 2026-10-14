@@ -466,13 +466,20 @@ def llm_complete(system, user, max_tokens, timeout=300):
     return strip_think(r.json()["choices"][0]["message"].get("content") or "")
 
 
-def recipe_gen(url, title, text, raw, max_links=5, depth=1, ctx=2048):
+RECIPE_STOP = {"flag": False}
+
+
+def recipe_gen(url, title, text, raw, max_links=5, depth=1, ctx=2048, crawl="balanced"):
     """Sequential (thermal-friendly): main page + ranked child links -> facts -> merged recipe(s)."""
     import time
 
     start = time.time()
-    time_budget = int(os.environ.get("RECIPE_TIME_BUDGET", "600"))
-    char_budget = int(os.environ.get("RECIPE_CHAR_BUDGET", "40000"))
+    RECIPE_STOP["flag"] = False
+    is_max = crawl == "max"
+    if is_max:
+        depth, max_links = 2, max(max_links, 50)
+    time_budget = int(os.environ.get("RECIPE_TIME_BUDGET", "7200" if is_max else "600"))
+    char_budget = int(os.environ.get("RECIPE_CHAR_BUDGET", "1000000" if is_max else "40000"))
     page_chars = max(800, (ctx - 300 - 200) * 3)  # one page per call fits the context
     sys_facts = "You extract practical knowledge. Use only the PAGE text. Be brief."
     yield ""
@@ -480,14 +487,18 @@ def recipe_gen(url, title, text, raw, max_links=5, depth=1, ctx=2048):
     visited = {url} if url else set()
     if url and max_links > 0:
         queue = rank_links(url, raw, f"{title} {text[:300]}", visited, max_links)
-        if depth >= 2:
+        if depth >= 2 and not is_max:
             queue = queue[: max(1, max_links // 2)]
         visited.update(queue)
+        queue = [(q, 1) for q in queue]
         total = len(queue)
         yield f"> Found {total} relevant link(s) on the page.\n"
         i = 0
         while queue and len(pages) - 1 < max_links:
-            u = queue.pop(0)
+            if RECIPE_STOP["flag"]:
+                yield "> Stopped. Making a recipe from what was read so far.\n"
+                break
+            u, lvl = queue.pop(0)
             i += 1
             if time.time() - start > time_budget * 0.5 or sum(len(p[2]) for p in pages) > char_budget:
                 yield "> Time/size budget reached, skipping the remaining links.\n"
@@ -502,15 +513,15 @@ def recipe_gen(url, title, text, raw, max_links=5, depth=1, ctx=2048):
                 yield ">   skipped (no useful text)\n"
                 continue
             pages.append((u, tt, t, rw))
-            if depth >= 2 and len(pages) - 1 + len(queue) < max_links:
+            if lvl < depth and len(pages) - 1 + len(queue) < max_links:
                 more = rank_links(u, rw, f"{title} {tt}", visited, max_links - len(pages) + 1 - len(queue))
                 visited.update(more)
-                queue.extend(more)
+                queue.extend((m, lvl + 1) for m in more)
                 total += len(more)
     facts, used = [], []
     for n, (u, tt, t, _) in enumerate(pages, 1):
-        if time.time() - start > time_budget:
-            yield "> Time budget reached, using what was read so far.\n"
+        if time.time() - start > time_budget or (RECIPE_STOP["flag"] and facts):
+            yield "> Stopped/time budget reached, using what was read so far.\n"
             break
         yield f"> Extracting key facts {n}/{len(pages)}...\n"
         try:
@@ -532,7 +543,28 @@ def recipe_gen(url, title, text, raw, max_links=5, depth=1, ctx=2048):
         yield "[The model returned no useful facts. Try another link or raise MAX_TOKENS.]"
         return
     yield f"> Writing recipe from {len(used)} source(s)...\n\n"
-    merged = "\n\n".join(facts)[: max(800, (ctx - MAX_TOKENS - 400) * 3)]
+    limit = max(800, (ctx - MAX_TOKENS - 400) * 3)
+    rnd = 0
+    while len("\n\n".join(facts)) > limit and len(facts) > 1 and rnd < 4:
+        rnd += 1
+        groups, cur = [], ""
+        for f in facts:
+            if cur and len(cur) + len(f) > limit:
+                groups.append(cur)
+                cur = ""
+            cur += f[:limit] + "\n\n"
+        groups.append(cur)
+        if len(groups) >= len(facts):
+            break
+        yield f"> Condensing facts (round {rnd}, {len(groups)} group(s))...\n"
+        new = []
+        for g in groups:
+            try:
+                new.append(llm_complete(sys_facts, f"FACTS:\n{g}\n\nTASK: Merge into at most 10 short bullets. Keep exact commands.", 300))
+            except Exception as e:  # noqa: BLE001
+                yield f"[{e}]\n"
+        facts = [x for x in new if x] or facts
+    merged = "\n\n".join(facts)[:limit]
     try:
         out = llm_complete(
             "You are a private on-device assistant. Use only the FACTS.",
@@ -990,6 +1022,14 @@ def get_recipe(name):
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
+@app.post("/recipes/stop")
+def stop_recipe():
+    if not authorized():
+        return jsonify(error="Wrong or missing token."), 401
+    RECIPE_STOP["flag"] = True
+    return jsonify(ok=True)
+
+
 @app.post("/analyze")
 def analyze():
     if not authorized():
@@ -1063,7 +1103,8 @@ def analyze():
         except (TypeError, ValueError):
             ml, dp = 5, 1
         return Response(
-            recipe_gen(d.get("url") or "", title, text, raw, ml, dp, ctx),
+            recipe_gen(d.get("url") or "", title, text, raw, ml, dp, ctx,
+                       "max" if d.get("crawl") == "max" else "balanced"),
             mimetype="text/plain; charset=utf-8",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
