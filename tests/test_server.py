@@ -245,7 +245,7 @@ def test_recipe_background_job_interrupt_and_resume(app_client, tmp_path, monkey
         if j["status"] != "running":
             break
         time.sleep(0.05)
-    assert j["status"] == "stopped" and "KB/s" in j["live"]["speed"] and j["live"]["temp"] == "34.5°C"
+    assert j["status"] == "stopped" and "KB/s" in j["live"]["speed"] and j["live"]["phase"] == "model" and j["live"]["temp"] == "34.5°C"
     assert "KB/s" not in j["text"] and "°C" not in j["text"]  # live bar only, not in the log
     assert "skipped (no useful text)" in j["text"]
     first_fetches = len(fetched)
@@ -267,3 +267,12 @@ def test_battery_temp_fallback(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "BATTERY_TEMP_FILE", str(tmp_path / "missing"))
     monkeypatch.setattr(server.shutil, "which", lambda n: None)
     assert server.battery_temp() == "n/a"
+
+
+def test_llm_complete_records_timings(monkeypatch):
+    resp = MagicMock(status_code=200)
+    resp.json.return_value = {"choices": [{"message": {"content": "ok"}}],
+                              "timings": {"predicted_per_second": 20.44, "prompt_per_second": 182.1}}
+    monkeypatch.setattr(server.requests, "post", lambda *a, **k: resp)
+    assert server.llm_complete("s", "u", 5) == "ok"
+    assert server.RECIPE_LIVE["gen_tps"] == "20.4 t/s" and server.RECIPE_LIVE["prompt_tps"] == "182.1 t/s"

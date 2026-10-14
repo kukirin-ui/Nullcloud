@@ -345,7 +345,10 @@ function showJob(d){
   const out=$("out"),atEnd=out.scrollTop+out.clientHeight>=out.scrollHeight-20;
   const lv=d.live||{},bar=$("job-bar");
   bar.style.display=d.status==="running"?"block":"none";
-  bar.textContent=`⬇ ${lv.speed||"n/a"}${lv.size?" ("+lv.size+")":""} · 🌡 Battery ${lv.temp||"n/a"}`;
+  const parts=[`⚡ Gen ${lv.gen_tps||"–"}`+(lv.prompt_tps?` · Prompt ${lv.prompt_tps}`:"")];
+  if(lv.phase==="fetch"&&lv.speed)parts.push(`⬇ ${lv.speed}${lv.size?" ("+lv.size+")":""}`);
+  parts.push(`🌡 Battery ${lv.temp||"n/a"}`);
+  bar.textContent=parts.join(" · ");
   out.textContent=`[Recipe job ${d.id} · ${d.crawl||""} · ${st}]\n${d.url||""}\n\n`+(d.text||"");
   if(atEnd)out.scrollTop=out.scrollHeight;
 }

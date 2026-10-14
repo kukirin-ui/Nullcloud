@@ -470,11 +470,20 @@ def llm_complete(system, user, max_tokens, timeout=300):
         except ValueError:
             err = r.text[:300]
         raise RuntimeError(f"Model error ({r.status_code}): {err or 'unknown error'}")
-    return strip_think(r.json()["choices"][0]["message"].get("content") or "")
+    data = r.json()
+    tm = data.get("timings") or {}
+    try:
+        if tm.get("predicted_per_second"):
+            RECIPE_LIVE["gen_tps"] = f"{float(tm['predicted_per_second']):.1f} t/s"
+        if tm.get("prompt_per_second"):
+            RECIPE_LIVE["prompt_tps"] = f"{float(tm['prompt_per_second']):.1f} t/s"
+    except (TypeError, ValueError):
+        pass
+    return strip_think(data["choices"][0]["message"].get("content") or "")
 
 
 RECIPE_STOP = {"flag": False}
-RECIPE_LIVE = {"speed": "", "size": ""}  # live status bar (not written into the log)
+RECIPE_LIVE = {"speed": "", "size": "", "phase": "", "gen_tps": "", "prompt_tps": ""}  # live status bar (not written into the log)
 BATTERY_TEMP_FILE = os.environ.get("BATTERY_TEMP_FILE", "/sys/class/power_supply/battery/temp")
 FETCH_LIMIT = 2_000_000
 
@@ -630,6 +639,7 @@ def recipe_gen(url, title, text, raw, max_links=5, depth=1, ctx=2048, crawl="bal
         if len(text) < 20:
             yield "[No text to analyze.]"
             return
+    RECIPE_LIVE.update(phase="fetch", gen_tps="", prompt_tps="")
     cache.save_state(step="crawling", crawl=crawl, title=title)
     pages = [(url or "(pasted text)", title, text, raw)]
     visited = {url} if url else set()
@@ -672,6 +682,7 @@ def recipe_gen(url, title, text, raw, max_links=5, depth=1, ctx=2048, crawl="bal
     cached_facts = sum(1 for p in pages if cache.get_facts(p[0], fkey) is not None)
     if cached_pages or cached_facts:
         yield f"> Resuming: {cached_pages}/{len(pages)} pages cached, {cached_facts}/{len(pages)} facts cached.\n"
+    RECIPE_LIVE["phase"] = "model"
     cache.save_state(step="extracting", pages=[p[0] for p in pages])
     facts, used = [], []
     for n, (u, tt, t, _) in enumerate(pages, 1):
@@ -1213,7 +1224,9 @@ def _job_file():
 
 
 def _job_public(j):
-    live = {"speed": RECIPE_LIVE.get("speed") or "n/a", "size": RECIPE_LIVE.get("size") or "", "temp": battery_temp()}
+    live = {"phase": RECIPE_LIVE.get("phase") or "", "gen_tps": RECIPE_LIVE.get("gen_tps") or "",
+            "prompt_tps": RECIPE_LIVE.get("prompt_tps") or "", "speed": RECIPE_LIVE.get("speed") or "",
+            "size": RECIPE_LIVE.get("size") or "", "temp": battery_temp()}
     return {k: j.get(k) for k in ("id", "url", "crawl", "status", "started", "finished")} | {"text": "".join(j["log"]), "live": live}
 
 
