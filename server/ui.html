@@ -56,10 +56,18 @@ code{font-family:ui-monospace,monospace;font-size:12px;background:var(--bg);padd
     <option value="summary">Summary (3-5 bullets + why it matters)</option>
     <option value="facts">Key facts, numbers, names &amp; dates</option>
     <option value="claims">Claims check (evidence vs assertions)</option>
+    <option value="recipe">Recipe (extract knowledge, save as .md)</option>
     <option value="eli5">Explain simply (ELI5)</option>
     <option value="translate">Translate</option>
     <option value="ask">Ask a question</option>
   </select>
+  <div id="recipe-opts" class="small" style="display:none;margin:6px 0">
+    Crawl <select id="crawl" style="width:auto"><option value="balanced">Balanced</option><option value="max">Max</option></select>
+    <button id="stop-btn" type="button" style="width:auto">Stop</button>
+    <span id="max-warn" style="display:none;color:#c60"> Max reads up to 50 pages (depth 2). It takes long and heats the phone. Stop keeps what was read.</span><br>
+    Follow links: max <input id="max-links" type="number" min="0" max="8" value="5" style="width:60px">
+    depth <select id="depth" style="width:auto"><option value="1">1</option><option value="2">2</option></select>
+  </div>
   <input id="q" class="hide" placeholder="Your question about this page / document">
   <input id="lang" placeholder="Answer language (optional, e.g. Spanish)">
   <button id="go">Run On-Device</button>
@@ -79,6 +87,11 @@ code{font-family:ui-monospace,monospace;font-size:12px;background:var(--bg);padd
       <input id="lib-q" placeholder="Search saved titles, URLs, full text, or summaries..." style="margin:0">
       <button id="lib-search-btn" style="max-width:120px;margin:0">Search</button>
     </div>
+  </div>
+  <div class="card">
+    <h3>Saved Recipes</h3>
+    <button id="recipes-btn">Show saved recipes</button>
+    <div id="recipe-list"></div>
   </div>
   <div id="lib-list"></div>
 </section>
@@ -280,7 +293,10 @@ $("go").onclick=async()=>{
     q:$("q").value,
     lang,
     gpu_layers:Number($("gpu-layers").value),
-    cpu_threads:Number($("cpu-threads").value)
+    cpu_threads:Number($("cpu-threads").value),
+    max_links:Number($("max-links").value),
+    depth:Number($("depth").value),
+    crawl:$("crawl").value
   };
   if(pdfBase64){body.pdf_base64=pdfBase64;body.filename=pdfFilename;}
   try{
@@ -308,6 +324,23 @@ $("last-btn").onclick=async()=>{
   }catch(e){$("out").textContent="Error: "+e.message;}
 };
 $("lib-search-btn").onclick=loadLibrary;
+$("crawl").onchange=()=>{$("max-warn").style.display=$("crawl").value==="max"?"inline":"none";};
+$("stop-btn").onclick=()=>fetch("/recipes/stop",{method:"POST",headers:headers()});
+$("mode").addEventListener("change",()=>{$("recipe-opts").style.display=$("mode").value==="recipe"?"block":"none";});
+async function loadRecipes(){
+  const box=$("recipe-list");if(!box)return;
+  try{
+    const r=await fetch("/recipes",{headers:headers()});const d=await r.json();
+    if(!r.ok){box.innerHTML=`<div class="card small">${esc(d.error||"Error")}</div>`;return;}
+    box.innerHTML=`<p class="small">Saved in ${esc(d.dir)}</p>`+(d.items.length?d.items.map(it=>`<div class="card small"><strong>${esc(it.name)}</strong> · ${esc(it.modified)} <button data-r="${esc(it.name)}" class="rv">View</button> <button data-r="${esc(it.name)}" class="rd">Download</button></div>`).join(""):'<div class="card small">No recipes yet. Pick "Recipe" and analyze a link.</div>');
+    box.querySelectorAll("button[data-r]").forEach(b=>b.onclick=async()=>{
+      const n=b.dataset.r,rr=await fetch("/recipes/"+encodeURIComponent(n),{headers:headers()});const t=await rr.text();
+      if(b.classList.contains("rv")){$("out").textContent=t;showTab("analyze");return;}
+      const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([t],{type:"text/markdown"}));a.download=n;a.click();
+    });
+  }catch(e){box.innerHTML=`<div class="card small">Error: ${esc(e.message)}</div>`;}
+}
+$("recipes-btn").onclick=loadRecipes;
 $("preset-save-btn").onclick=async()=>{
   const r=await fetch("/presets",{method:"POST",headers:headers(),body:JSON.stringify({
     name:$("preset-name").value,category:$("preset-cat").value,prompt:$("preset-prompt").value

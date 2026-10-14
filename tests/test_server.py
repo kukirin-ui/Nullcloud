@@ -165,3 +165,41 @@ def test_library_presets_and_pdf_work_without_license(app_client):
 
     lib_miss = app_client.get("/library?q=nonexistentwordxyz", headers=headers).get_json()
     assert lib_miss["count"] == 0
+
+
+def test_rank_links_skips_nav_social_media_and_dupes():
+    html = ('<nav><a href="/vulkan-nav">Vulkan nav</a></nav><a href="/login">Login</a>'
+            '<a href="/vulkan-build">Vulkan build guide</a><a href="/vulkan-build">again</a>'
+            '<a href="/x.png">Vulkan image</a><a href="https://facebook.com/s">Share</a>')
+    links = server.rank_links("https://ex.com/a", html, "vulkan build", {"https://ex.com/a"}, 5)
+    assert links == ["https://ex.com/vulkan-build"]
+
+
+def test_recipe_mode_follows_links_and_saves(app_client, tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "RECIPES_DIR", tmp_path / "recipes")
+    main = ("Vulkan build guide " * 20, '<a href="/child">Vulkan build steps</a>', "Vulkan build")
+    child = ("cmake -B build -DGGML_VULKAN=ON " * 20, "", "Child")
+    monkeypatch.setattr(server, "fetch_text_with_meta", lambda u, timeout=20: child if u.endswith("/child") else main)
+    monkeypatch.setattr(server, "llm_complete", lambda s, u, m, timeout=300: "- fact" if u.startswith("PAGE") else "# Vulkan Build\n## Problem\nx")
+    h = {"X-Token": "test-secret-token-12345"}
+    for _ in range(2):
+        out = app_client.post("/analyze", headers=h, json={"url": "https://ex.com/", "mode": "recipe"}).get_data(as_text=True)
+        assert "Reading 1/1: https://ex.com/child" in out and "Recipe saved" in out
+    names = [i["name"] for i in app_client.get("/recipes", headers=h).get_json()["items"]]
+    assert sorted(names) == ["vulkan-build-2.md", "vulkan-build.md"]
+    md = app_client.get("/recipes/vulkan-build.md", headers=h).get_data(as_text=True)
+    assert "- https://ex.com/child" in md and "## Date" in md
+
+
+def test_recipe_max_mode_crawls_depth2_and_stop(app_client, tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "RECIPES_DIR", tmp_path / "recipes")
+    def fetch(u, timeout=20):
+        n = int(u.rsplit("/", 1)[-1] or 0) if u.rsplit("/", 1)[-1].isdigit() else 0
+        links = "".join(f'<a href="/{n*10+k}">vulkan build {k}</a>' for k in range(1, 4))
+        return ("Vulkan build text " * 30, links, f"Vulkan build {n}")
+    monkeypatch.setattr(server, "fetch_text_with_meta", fetch)
+    monkeypatch.setattr(server, "llm_complete", lambda s, u, m, timeout=300: "- fact" if not u.startswith("FACTS") or "Merge" in u else "# Vulkan Build\nx")
+    h = {"X-Token": "test-secret-token-12345"}
+    out = app_client.post("/analyze", headers=h, json={"url": "https://ex.com/", "mode": "recipe", "crawl": "max"}).get_data(as_text=True)
+    assert "Reading 12/12" in out and "Recipe saved" in out  # 3 children + 9 grandchildren
+    assert app_client.post("/recipes/stop", headers=h).status_code == 200
