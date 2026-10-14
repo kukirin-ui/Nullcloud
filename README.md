@@ -98,7 +98,7 @@ Nullcloud is 100% free and open source under the **MIT License**. Every feature 
 | **On-Device, No Cloud AI** (Airplane Mode ready) | Yes |
 | **Android Share Sheet -> Summary Notification** | Yes |
 | **Web UI (`127.0.0.1:8080`) & Browser Extension** | Yes |
-| **6 Built-In Modes** (Summary, Facts, Claims, ELI5, Translate, Ask) | Yes |
+| **7 Built-In Modes** (Summary, Facts, Claims, ELI5, Translate, Ask, **Recipe**) | Yes |
 | **Read Aloud (TTS) & Markdown / Obsidian Export** | Yes |
 | **Saved-Page Library with SQLite FTS5 Search** | Yes |
 | **Offline PDF Input** | Yes |
@@ -177,6 +177,30 @@ Need turn-key deployment of **on-device, no cloud AI** for privileged legal disc
 Still stuck? Open an [issue](https://github.com/kukirin-ui/Nullcloud/issues), or book a [remote setup](#services-optional-paid).
 
 ---
+
+## Updating & GitHub tokens
+
+This repository is **public**. You do **not** need a GitHub token or login to `git clone` or `git pull`.
+
+Update Nullcloud on your phone (Termux):
+
+```bash
+cd ~/Nullcloud && git pull && pkill -f server.py; bash termux/start.sh
+```
+
+Then refresh `http://127.0.0.1:8080`.
+
+**If `git` asks for a username or password**, your remote URL is wrong. Fix it:
+
+```bash
+git remote set-url origin https://github.com/kukirin-ui/Nullcloud.git
+```
+
+Then run `git pull` again. Do **not** paste a GitHub token as the password for a public clone/pull.
+
+A GitHub token (fine-grained PAT) is only needed if **you** want to `git push` changes. Never paste a GitHub token into the Nullcloud app, never commit it, and never share it. (The separate Nullcloud Web UI token in `~/.nullcloud-token` is unrelated — that is only for the local API.)
+
+**Recipe preset:** paste a page URL, choose **Balanced** (a few relevant links) or **Max** (deeper crawl), extract facts into a saved recipe under `~/nullcloud-recipes/`, and stop anytime — partial results still save. Open them from the Library tab (**Saved Recipes**).
 
 ## Configuration & Environment Variables
 
