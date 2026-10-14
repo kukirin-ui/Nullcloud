@@ -289,9 +289,11 @@ $("go").onclick=async()=>{
       const d=await r.json().catch(()=>({}));
       out.textContent=d.error||("Error "+r.status);return;
     }
-    const rd=r.body.getReader(),dc=new TextDecoder();out.textContent="";
-    for(;;){const{done,value}=await rd.read();if(done)break;out.textContent+=dc.decode(value,{stream:true});}
-  }catch(e){out.textContent="Error: "+e.message;}
+    const rd=r.body.getReader(),dc=new TextDecoder();let got="";
+    for(;;){const{done,value}=await rd.read();if(done)break;const t=dc.decode(value,{stream:true});if(!t)continue;got+=t;out.textContent=got;}
+    got+=dc.decode();
+    if(got.trim())out.textContent=got;else out.textContent="The model finished without an answer. Check ~/nullcloud-llm.log and try again.";
+  }catch(e){out.textContent="Error: "+e.message+" (the result may still be under 'Last result')";}
 };
 
 $("speak").onclick=()=>{if(speechSynthesis.speaking){speechSynthesis.cancel();return;}speechSynthesis.speak(new SpeechSynthesisUtterance($("out").textContent));};

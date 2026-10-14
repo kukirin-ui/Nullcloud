@@ -796,9 +796,18 @@ def analyze():
     eff_gpu_layers = int(d["gpu_layers"]) if d.get("gpu_layers") is not None and str(d.get("gpu_layers")).isdigit() else compute["gpu_layers"]
     eff_cpu_threads = int(d["cpu_threads"]) if d.get("cpu_threads") is not None and str(d.get("cpu_threads")).isdigit() else compute["cpu_threads"]
 
+    # Fit the page into the model context: ~3 chars/token is a safe estimate for
+    # mixed text. Leave room for the system prompt, task and the answer.
+    ctx = int(compute.get("ctx_size") or CTX_SIZE)
+    budget_tokens = max(256, ctx - MAX_TOKENS - 200 - len(task) // 3)
+    page_text = text[: min(MAX_CHARS, budget_tokens * 3)]
+
     payload = {
         "model": MODEL,
         "stream": True,
+        # Qwen3 and other reasoning models: answer directly instead of spending
+        # the whole token budget on hidden "thinking".
+        "chat_template_kwargs": {"enable_thinking": False},
         "temperature": 0.2,
         "max_tokens": MAX_TOKENS,
         "n_gpu_layers": eff_gpu_layers,
@@ -809,28 +818,93 @@ def analyze():
         },
         "messages": [
             {"role": "system", "content": system},
-            {"role": "user", "content": f"PAGE:\n{text[:MAX_CHARS]}\n\nTASK: {task}"},
+            {"role": "user", "content": f"PAGE:\n{page_text}\n\nTASK: {task} /no_think"},
         ],
     }
 
     def gen():
         acc = []
+        state = {"in_think": False, "buf": "", "reasoning": False, "finish": None}
+
+        def clean(delta):
+            """Drop <think>...</think> blocks that some templates put into content."""
+            out = []
+            buf = state["buf"] + delta
+            state["buf"] = ""
+            while buf:
+                if state["in_think"]:
+                    end = buf.find("</think>")
+                    if end < 0:
+                        state["buf"] = buf[-8:]
+                        return "".join(out)
+                    buf = buf[end + 8 :]
+                    state["in_think"] = False
+                else:
+                    start = buf.find("<think>")
+                    if start < 0:
+                        # keep a possible partial "<think" tag for the next chunk
+                        cut = buf.rfind("<")
+                        if cut >= 0 and "<think>".startswith(buf[cut:]):
+                            state["buf"] = buf[cut:]
+                            buf = buf[:cut]
+                        out.append(buf)
+                        break
+                    out.append(buf[:start])
+                    buf = buf[start + 7 :]
+                    state["in_think"] = True
+            return "".join(out)
+
         try:
+            yield ""  # start the response so the UI knows the server is working
             with requests.post(LLM_URL, json=payload, stream=True, timeout=(5, 600)) as r:
-                r.raise_for_status()
+                status = r.status_code if isinstance(r.status_code, int) else 200
+                if status >= 400:
+                    try:
+                        err = r.json().get("error")
+                        err = err.get("message") if isinstance(err, dict) else err
+                    except ValueError:
+                        err = r.text[:300]
+                    yield f"[Model error ({status}): {err or 'unknown error'}. Try a shorter page or a larger context (CTX_SIZE).]"
+                    return
                 for line in r.iter_lines():
                     if not line.startswith(b"data:"):
+                        if line.startswith(b"error:"):
+                            yield f"[Model error: {line[6:].decode('utf-8', 'replace').strip()}]"
                         continue
                     chunk = line[5:].strip()
                     if chunk == b"[DONE]":
                         break
                     try:
-                        delta = json.loads(chunk)["choices"][0]["delta"].get("content")
-                    except (ValueError, KeyError, IndexError):
+                        obj = json.loads(chunk)
+                    except ValueError:
                         continue
+                    if obj.get("error"):
+                        e = obj["error"]
+                        yield f"[Model error: {e.get('message') if isinstance(e, dict) else e}]"
+                        continue
+                    try:
+                        choice = obj["choices"][0]
+                    except (KeyError, IndexError, TypeError):
+                        continue
+                    state["finish"] = choice.get("finish_reason") or state["finish"]
+                    dl = choice.get("delta") or {}
+                    if dl.get("reasoning_content"):
+                        state["reasoning"] = True
+                    delta = clean(dl.get("content") or "")
                     if delta:
+                        if not acc:
+                            delta = delta.lstrip()
+                            if not delta:
+                                continue
                         acc.append(delta)
                         yield delta
+            if not "".join(acc).strip():
+                why = (
+                    "the model spent its whole token budget thinking"
+                    if state["reasoning"] or state["in_think"]
+                    else f"finish reason: {state['finish'] or 'unknown'}"
+                )
+                yield f"[The model returned no answer ({why}). Try again, pick another preset, or raise MAX_TOKENS.]"
             full_output = "".join(acc).strip()
             if full_output:
                 try:
